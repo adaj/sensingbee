@@ -1,4 +1,7 @@
-data*
-.ipynb_checkpoints
+*.csv
+sensors_information
+*.ipynb_checkpoints
 shape
 deprecated
+data_30days
+data_allsensors_8days

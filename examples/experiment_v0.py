@@ -43,27 +43,30 @@ for freq in ['D','H']:
         if freq=='H':
             variables['exogenous'].append('hour')
 
-        zx, zi = ingestion(sensors, metadata, sfeat, variables, 5, 'NO2', 'randomized')
+        try:
+            zx, zi = ingestion(sensors, metadata, sfeat, variables, 5, 'NO2', 'randomized')
 
-        for transf in ['none', 'iwd', 'savg', 'nn']:
-            print(freq, transf)
+            for transf in ['none', 'iwd', 'savg', 'nn']:
+                print(freq, transf)
 
-            if transf == 'iwd':
-                zxtmp = iwd_features(zx, variables['sensors'])
-                zxtmp = zxtmp.join(zx[zx.columns[-11:]])
-            elif transf == 'savg':
-                zxtmp = spavg_features(zx, variables['sensors'])
-                zxtmp = zxtmp.join(zx[zx.columns[-11:]])
-            elif transf == 'nn':
-                zxtmp = nn_features(zx, variables['sensors'])
-                zxtmp = zxtmp.join(zx[zx.columns[-11:]])
-            else:
-                zxtmp = zx
+                if transf == 'iwd':
+                    zxtmp = iwd_features(zx, variables['sensors'])
+                    zxtmp = zxtmp.join(zx[zx.columns[-11:]])
+                elif transf == 'savg':
+                    zxtmp = spavg_features(zx, variables['sensors'])
+                    zxtmp = zxtmp.join(zx[zx.columns[-11:]])
+                elif transf == 'nn':
+                    zxtmp = nn_features(zx, variables['sensors'])
+                    zxtmp = zxtmp.join(zx[zx.columns[-11:]])
+                else:
+                    zxtmp = zx
 
-            best = {}
-            best['rf'] = rf(zx.values, np.ravel(zi.values), ml_iterations, False)
-            best['ab'] = ab(zx.values, np.ravel(zi.values), ml_iterations, False)
-            best['mlp'] = mlp(zx.values, np.ravel(zi.values), int(ml_iterations), False)
-            scores.loc[(freq,transf,feat_conf)] = best
+                best = {}
+                best['rf'] = rf(zx.values, np.ravel(zi.values), ml_iterations, False)
+                best['ab'] = ab(zx.values, np.ravel(zi.values), ml_iterations, False)
+                best['mlp'] = mlp(zx.values, np.ravel(zi.values), int(ml_iterations), False)
+                scores.loc[(freq,transf,feat_conf)] = best
+        except:
+            continue
 
 scores.to_csv(DATA_FOLDER+'results_experiments_NO2_freq-transf-featconf-ml.csv')
