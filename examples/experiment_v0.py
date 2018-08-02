@@ -10,38 +10,60 @@ print('data loaded')
 
 ml_iterations = 10
 variables =  {
-    'sensors':['NO2','Temperature','O3','CO','PM10'],
-    'exogenous':['street','day','dow']
+        'sensors':['NO2','Temperature','O3','CO','PM10'],
+        'exogenous':['street','day','dow']
 }
 
-scores = pd.DataFrame(index=pd.MultiIndex.from_product([['D','H'],['none','iwd','savg','nn']], names=['freq','transf']) ,columns=['rf','ab','mlp'])
+scores = pd.DataFrame(index=pd.MultiIndex.from_product([['D','H'],['none','iwd','savg','nn'],['ys', 'ns', 'mys', 'mns']], names=['freq','transf','feat_conf']) ,columns=['rf','ab','mlp'])
 for freq in ['D','H']:
 
-    if freq=='H':
-        variables['exogenous'].append('hour')
-
     sensors, metadata = resampling_sensors(sensors0, metadata0, variables, freq)
-    zx, zi = ingestion(sensors, metadata, sfeat, variables, 5, 'NO2', 'randomized')
 
-    for transf in ['none', 'iwd', 'savg', 'nn']:
-        print(freq, transf)
+    for feat_conf in ['ys', 'ns', 'mys', 'mns']:
+        if feat_conf == 'ys':
+            variables =  {
+                'sensors':['NO2','Temperature','O3','CO','PM10'],
+                'exogenous':['street','day','dow']
+            }
+        elif feat_conf == 'ns':
+            variables =  {
+                'sensors':['NO2','Temperature','O3','CO','PM10'],
+                'exogenous':['street','day','dow']
+            }
+        elif feat_conf == 'mys':
+            variables =  {
+                'sensors':['NO2'],
+                'exogenous':['street','day','dow']
+            }
+        elif feat_conf == 'mns':
+            variables =  {
+                'sensors':['NO2'],
+                'exogenous':['day','dow']
+            }
+        if freq=='H':
+            variables['exogenous'].append('hour')
 
-        if transf == 'iwd':
-            zxtmp = iwd_features(zx, variables['sensors'])
-            zxtmp = zxtmp.join(zx[zx.columns[-11:]])
-        elif transf == 'savg':
-            zxtmp = spavg_features(zx, variables['sensors'])
-            zxtmp = zxtmp.join(zx[zx.columns[-11:]])
-        elif transf == 'nn':
-            zxtmp = nn_features(zx, variables['sensors'])
-            zxtmp = zxtmp.join(zx[zx.columns[-11:]])
-        else:
-            zxtmp = zx
+        zx, zi = ingestion(sensors, metadata, sfeat, variables, 5, 'NO2', 'randomized')
 
-        best = {}
-        best['rf'] = rf(zx.values, np.ravel(zi.values), ml_iterations, False)
-        best['ab'] = ab(zx.values, np.ravel(zi.values), ml_iterations, False)
-        best['mlp'] = mlp(zx.values, np.ravel(zi.values), int(ml_iterations), False)
-        scores.loc[(freq,transf)] = best
+        for transf in ['none', 'iwd', 'savg', 'nn']:
+            print(freq, transf)
 
-scores.to_csv(DATA_FOLDER+'results_experiments_NO2_freq-transf-ml.csv')
+            if transf == 'iwd':
+                zxtmp = iwd_features(zx, variables['sensors'])
+                zxtmp = zxtmp.join(zx[zx.columns[-11:]])
+            elif transf == 'savg':
+                zxtmp = spavg_features(zx, variables['sensors'])
+                zxtmp = zxtmp.join(zx[zx.columns[-11:]])
+            elif transf == 'nn':
+                zxtmp = nn_features(zx, variables['sensors'])
+                zxtmp = zxtmp.join(zx[zx.columns[-11:]])
+            else:
+                zxtmp = zx
+
+            best = {}
+            best['rf'] = rf(zx.values, np.ravel(zi.values), ml_iterations, False)
+            best['ab'] = ab(zx.values, np.ravel(zi.values), ml_iterations, False)
+            best['mlp'] = mlp(zx.values, np.ravel(zi.values), int(ml_iterations), False)
+            scores.loc[(freq,transf,feat_conf)] = best
+
+scores.to_csv(DATA_FOLDER+'results_experiments_NO2_freq-transf-featconf-ml.csv')

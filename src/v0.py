@@ -110,6 +110,27 @@ def ingestion(sensors, metadata, sfeat, variables, k, target, method):
 
     return zx, zi
 
+def spatial_features(lines, points, metadata, distance):
+    l = ['cycleway','primary','secondary','service','footway','residential']
+    p = ['traffic_signals','bus_stop','crossing']
+
+    lines = lines[lines['highway'].isin(l)]
+    points = points[points['highway'].isin(p)]
+
+    ldf = pd.DataFrame(columns=l)
+    pdf = pd.DataFrame(columns=p)
+
+    for m in range(metadata.shape[0]):
+        i = metadata.iloc[m]
+
+        # distance of 0.0011 = 100m radius
+        lfeatures = lines[lines['geometry'].apply(lambda x: x.distance(i['geometry']))<distance]['highway'].value_counts().reindex(lines['highway'].unique(), fill_value=0)
+        ldf.loc[i.name] = lfeatures[l]
+
+        pfeatures = points[points['geometry'].apply(lambda x: x.distance(i['geometry']))<distance]['highway'].value_counts().reindex(points['highway'].unique(), fill_value=0)
+        pdf.loc[i.name] = pfeatures[p]
+    return  pd.concat([ldf,pdf],axis=1)
+
 def iwd_features(zx, sensor_variables):
     ziwd = pd.DataFrame(index=zx.index)
     for var in sensor_variables:
