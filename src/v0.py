@@ -110,26 +110,37 @@ def ingestion(sensors, metadata, sfeat, variables, k, target, method):
 
     return zx, zi
 
-def spatial_features(lines, points, metadata, distance):
-    l = ['cycleway','primary','secondary','service','footway','residential']
-    p = ['traffic_signals','bus_stop','crossing']
+def spatial_features(lines, points, metadata, conf):
+    lines = lines[lines['highway'].isin(conf['lines'])]
+    points = points[points['highway'].isin(conf['points'])]
 
-    lines = lines[lines['highway'].isin(l)]
-    points = points[points['highway'].isin(p)]
+    if conf['method'] == 'count_nn':
+        ldf = pd.DataFrame(columns=conf['lines'])
+        pdf = pd.DataFrame(columns=conf['points'])
+        for m in range(metadata.shape[0]):
+            i = metadata.iloc[m]
+            # distance of 0.0011 = 100m radius
+            lfeatures = lines[lines['geometry'].apply(lambda x: x.distance(i['geometry']))<conf['radius']]['highway'].value_counts().reindex(lines['highway'].unique(), fill_value=0)
+            ldf.loc[i.name] = lfeatures[l]
 
-    ldf = pd.DataFrame(columns=l)
-    pdf = pd.DataFrame(columns=p)
-
-    for m in range(metadata.shape[0]):
-        i = metadata.iloc[m]
-
-        # distance of 0.0011 = 100m radius
-        lfeatures = lines[lines['geometry'].apply(lambda x: x.distance(i['geometry']))<distance]['highway'].value_counts().reindex(lines['highway'].unique(), fill_value=0)
-        ldf.loc[i.name] = lfeatures[l]
-
-        pfeatures = points[points['geometry'].apply(lambda x: x.distance(i['geometry']))<distance]['highway'].value_counts().reindex(points['highway'].unique(), fill_value=0)
-        pdf.loc[i.name] = pfeatures[p]
-    return  pd.concat([ldf,pdf],axis=1)
+            pfeatures = points[points['geometry'].apply(lambda x: x.distance(i['geometry']))<conf['radius']]['highway'].value_counts().reindex(points['highway'].unique(), fill_value=0)
+            pdf.loc[i.name] = pfeatures[p]
+        return pd.concat([ldf,pdf],axis=1)
+    
+    elif conf['method'] == 'distance':
+        df = pd.DataFrame(columns=conf['lines']+conf['points'])
+        
+        for m in range(metadata.shape[0]):
+            i = metadata.iloc[m]
+            
+            d = {}
+            for key in conf['lines']:
+                d[key] = 1/lines.loc[(lines['highway']==key) | (lines['highway']=='{}_link'.format(key)),'geometry'].apply(lambda x: x.distance(i['geometry'])).min()
+            for key in conf['points']:
+                d[key] = 1/points.loc[(points['highway']==key),'geometry'].apply(lambda x: x.distance(i['geometry'])).min()
+            df.loc[i.name] = d
+        return df
+        
 
 def iwd_features(zx, sensor_variables):
     ziwd = pd.DataFrame(index=zx.index)
