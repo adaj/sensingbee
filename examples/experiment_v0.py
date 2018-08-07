@@ -61,7 +61,7 @@ for freq in ['D','H']:
 
             best = {}
             best['rf'] = rf(zx.values, np.ravel(zi.values), ml_iterations, False)
-            best['ab'] = ab(zx.values, np.ravel(zi.values), ml_iterations, False)
+            best['gb'] = gb(zx.values, np.ravel(zi.values), ml_iterations, False)
             best['mlp'] = mlp(zx.values, np.ravel(zi.values), int(ml_iterations), False)
             scores.loc[(freq,transf,feat_conf)] = best
 
