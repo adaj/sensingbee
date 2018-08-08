@@ -78,7 +78,7 @@ def ingestion(sensors, metadata, sfeat, variables, k, target, method):
 
     if sfeat is not None:
         try:
-            zx = zx.reset_index([1]).join(sfeat).set_index('index',append=True).fillna(0)
+            zx = zx.reset_index([1]).join(sfeat).set_index('Timestamp',append=True).fillna(0)
         except:
             print('Warning: \'street\' variables are not available in metadata')
             pass

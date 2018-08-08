@@ -57,7 +57,7 @@ for freq in ['D','H']:
                 zxtmp = zxtmp.join(zx[variables['exogenous']])
             else:
                 zxtmp = zx
-            zxtmp = RobustScaler().fit_transform(zxtmp)
+            # zxtmp = RobustScaler().fit_transform(zxtmp)
 
             best = {}
             best['rf'] = rf(zx.values, np.ravel(zi.values), ml_iterations, False)
