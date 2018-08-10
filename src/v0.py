@@ -169,6 +169,24 @@ def nn_features(zx, sensor_variables):
         znn['nn_{}'.format(var)] = zx[['d_{}'.format(var),var]].apply(lambda x: x[var].values[x['d_{}'.format(var)].values.argmin()], axis=1)
     return znn
 
+def rfe(zx, zi, n=None, step=1):
+    from sklearn.feature_selection import RFE
+    from sklearn.ensemble import RandomForestRegressor
+    selector = RFE(RandomForestRegressor(), n_features_to_select=n, step=step)
+    selector.fit(zx, zi['Value'])
+    #sel = pd.DataFrame(columns=zx.columns)
+    #sel.loc['support']= selector.support_
+    #sel.loc['ranking'] = selector.ranking_
+    cols = sel.loc['support'].reset_index()['support']
+    zxtmp = zx.iloc[:,cols[cols].index]
+    return zxtmp
+
+def poly_rfe(zx, zi, n=30, step=50):
+    from sklearn.preprocessing import PolynomialFeatures
+    zxtmp = PolynomialFeatures(degree=2).fit_transform(zx)
+    zxtmp = rfe(zxtmp,zi,n=n,step=50)
+    return zxtmp
+
 def mlp(x, y, it, get_estimator):
     paramsmlp = {
         'hidden_layer_sizes':[(5,5),(10,5),(20,10),(40,20),(40,40),(10,5,5),(20,10,10),(50,30,20),(30,20,20,10),(15,10,5,5)],
@@ -203,7 +221,7 @@ def gb(x, y, it, get_estimator):
         'loss': ['ls','lad','huber','quantile'],
     }
     grid = RandomizedSearchCV(GradientBoostingRegressor(), param_distributions=paramsgb,
-                        n_iter=it, scoring='r2', n_jobs=-1, cv=5).fit(x, y) 
+                        n_iter=it, scoring='r2', n_jobs=-1, cv=5).fit(x, y)
     if get_estimator:
         return grid.best_score_, grid.best_estimator_
     else:
