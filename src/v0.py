@@ -12,7 +12,7 @@ from sklearn.ensemble import GradientBoostingRegressor
 import warnings
 warnings.filterwarnings('ignore')
 
-def load_data(SHAPE_FOLDER, DATA_FOLDER):
+def load_data(SHAPE_FOLDER, DATA_FOLDER, spatial_features=True): # to load metadata, sfeat and sensors
     lsoa = gpd.read_file(SHAPE_FOLDER+'Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp')
     lsoa = lsoa[lsoa['msoa11nm'].str.contains('Newcastle upon Tyne')]
     lsoa = lsoa.to_crs(fiona.crs.from_epsg(4326))
@@ -24,14 +24,27 @@ def load_data(SHAPE_FOLDER, DATA_FOLDER):
                             crs={'init': 'epsg:4326'}).to_crs(fiona.crs.from_epsg(4326))
     metadata = gpd.sjoin(metadata, lsoa, how='inner' ,op='intersects')[['type','active','lon','lat','geometry']]
 
-    sfeat = pd.read_csv(DATA_FOLDER+'street_features_newcastle.csv',index_col=0)
-    sfeat = sfeat.loc[metadata.index]
+    if spatial_features:
+        sfeat = pd.read_csv(DATA_FOLDER+'street_features_newcastle.csv',index_col=0)
+        sfeat = sfeat.loc[metadata.index]
+    else:
+        sfeat = pd.DataFrame()
 
     sensors = pd.read_csv(DATA_FOLDER+'data.csv')
     sensors['Timestamp'] = pd.to_datetime(sensors['Timestamp'])
     sensors = sensors.set_index(['Variable','Sensor Name','Timestamp'])
 
     return metadata, sfeat, sensors
+
+def load_data__(DATA_FOLDER):
+    zx = pd.read_csv(DATA_FOLDER+'zx.csv')
+    zx['Timestamp'] = pd.to_datetime(zx['Timestamp'])
+    zx.set_index(['Sensor Name','Timestamp'], inplace=True)
+    zx.rename(columns={key:key.split('.')[0] for key in zx.columns if '.' in key}, inplace=True)
+    zi = pd.read_csv(DATA_FOLDER+'zi.csv')
+    zi['Timestamp'] = pd.to_datetime(zi['Timestamp'])
+    zi.set_index(['Sensor Name','Timestamp'], inplace=True)
+    return zx, zi
 
 def resampling_sensors(sensors, metadata, variables, freq): # by region, variables and frequency
     idx = pd.IndexSlice
@@ -41,6 +54,19 @@ def resampling_sensors(sensors, metadata, variables, freq): # by region, variabl
     sensors = sensors.loc[idx[variables['sensors'],metadata.index,:],:]
     metadata = metadata.loc[sensors.index.get_level_values(1).unique()]
     return sensors, metadata
+
+def resampling_sensors__(zx, zi, freq):
+    if freq==zi.index.get_level_values(1).freq:
+        return zx, zi
+    idx = pd.IndexSlice
+    level_values = zx.index.get_level_values
+    zx = (zx.groupby([level_values(i) for i in [0]]
+                       +[pd.Grouper(freq=freq, level=-1)]).median())
+    zi = (zi.groupby([level_values(i) for i in [0]]
+                       +[pd.Grouper(freq=freq, level=-1)]).median())
+    if freq=='D' or freq=='W':
+        zx.drop('hour',axis=1,inplace=True)
+    return zx, zi
 
 def ingestion(sensors, metadata, sfeat, variables, k, target, method):
     zxcols = []
@@ -56,12 +82,16 @@ def ingestion(sensors, metadata, sfeat, variables, k, target, method):
                 sdf = sensors.loc[idx[var,:,t],:] # sensors of the var variable at  time t
                 mdf = metadata.loc[sdf.index.get_level_values(1).unique()] # metadata about them
 
-                dij = mdf['geometry'].apply(lambda x: si['geometry'].distance(x)).sort_values() # nearest measures for (var,t)
-                dij = dij.loc[(dij.index!=si.name) & (dij>0)] # excluding the sensor si
-                if method=='nn':
-                    dij = dij[:k]
-                elif method=='randomized':
-                    dij = dij[:10].sample(k, random_state=0)
+                try:
+                    dij = mdf['geometry'].apply(lambda x: si['geometry'].distance(x)).sort_values() # nearest measures for (var,t)
+                    dij = dij.loc[(dij.index!=si.name)] # excluding the sensor si
+                    if method=='nn':
+                        dij = dij[:k]
+                    elif method=='randomized':
+                        dij = dij[:10].sample(k, random_state=0)
+                except:
+                    print('erro in ',s,t,var)
+                    continue
                 zj = sdf.loc[idx[:,dij.index,:],:].values.reshape(1,-1)[0]
                 zx.loc[idx[si.name,t],'d_{}'.format(var)] = dij.values
                 zx.loc[idx[si.name,t],var] = zj
@@ -141,13 +171,13 @@ def nn_features(zx, sensor_variables):
 
 def mlp(x, y, it, get_estimator):
     paramsmlp = {
-        'hidden_layer_sizes':[(3,1),(3,5),(5,1),(5,5),(10,1),(10,3),(10,5),(20,3),(20,5),(20,10),(40,20),(40,40)],
-        'activation':['identity','relu','logistic'],
-        'alpha':np.logspace(0.0001,0.1,50)
+        'hidden_layer_sizes':[(5,5),(10,5),(20,10),(40,20),(40,40),(10,5,5),(20,10,10),(50,30,20),(30,20,20,10),(15,10,5,5)],
+        'activation':['relu'],
+        'alpha':np.linspace(1e-7,1e-3,50)
     }
 
-    grid = RandomizedSearchCV(MLPRegressor(max_iter=10000), param_distributions=paramsmlp,
-                        n_iter=it, scoring='r2', n_jobs=-1, cv=5).fit(x, y) # zx.values, np.ravel(y.values)
+    grid = RandomizedSearchCV(MLPRegressor(max_iter=10000, solver='sgd'), param_distributions=paramsmlp,
+                        n_iter=it, scoring='r2', n_jobs=-1, cv=5).fit(x, y)
     if get_estimator:
         return grid.best_score_, grid.best_estimator_
     else:
@@ -157,23 +187,23 @@ def rf(x, y, it, get_estimator):
     paramsrf = {
         'n_estimators':np.arange(5,300,5),
         'max_features':np.arange(0.1, 1.01, 0.05),
-        'max_depth':np.arange(1,20,2)
+        'max_depth':np.arange(1,50,3)
     }
     grid = RandomizedSearchCV(RandomForestRegressor(), param_distributions=paramsrf,
-                        n_iter=it, scoring='r2', n_jobs=-1, cv=5).fit(x, y) # zx.values, np.ravel(y.values)
+                        n_iter=it, scoring='r2', n_jobs=-1, cv=5).fit(x, y)
     if get_estimator:
         return grid.best_score_, grid.best_estimator_
     else:
         return grid.best_score_
 
 def gb(x, y, it, get_estimator):
-    paramsab = {
+    paramsgb = {
         'n_estimators':np.arange(5,300,5),
         'learning_rate':np.arange(0.01, 10.01, 0.1),
         'loss': ['ls','lad','huber','quantile'],
     }
     grid = RandomizedSearchCV(GradientBoostingRegressor(), param_distributions=paramsgb,
-                        n_iter=it, scoring='r2', n_jobs=-1, cv=5).fit(x, y) # zx.values, np.ravel(y.values)
+                        n_iter=it, scoring='r2', n_jobs=-1, cv=5).fit(x, y) 
     if get_estimator:
         return grid.best_score_, grid.best_estimator_
     else:

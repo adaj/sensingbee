@@ -11,7 +11,7 @@ print('data loaded')
 ml_iterations = 10
 variables =  {
         'sensors':['NO2','Temperature','Humidity','O3','CO','PM10'],
-        'exogenous':['street','day','dow','hour'] #'street' = 'primary','trunk','motorway','traffic_signals'
+        'exogenous':['primary','trunk','motorway','traffic_signals','day','dow','hour'] #'street' = 'primary','trunk','motorway','traffic_signals'
 }
 
 scores = pd.DataFrame(index=pd.MultiIndex.from_product([['D','H'],['none','iwd','savg','nn'],['multi_exo', 'multi_endo', 'mono_exo', 'mono_endo']], names=['freq','transf','feat_conf']) ,columns=['rf','ab','mlp'])
