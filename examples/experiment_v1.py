@@ -16,8 +16,8 @@ scores = pd.DataFrame(index=pd.MultiIndex.from_product([['H','D'],['Nan','pca_id
 for freq in ['H','D']:
     print(freq)
     variables =  {
-	'sensors':['NO2','Temperature','O3','CO'],
-        'exogenous':['primary','trunk','motorway','traffic_signals','day','dow','hour'] 
+	   'sensors':['NO2','Temperature','O3','CO'],
+        'exogenous':['primary','trunk','motorway','traffic_signals','day','dow','hour']
     }
 
     zx, zi = resampling_sensors__(zx, zi, freq)
