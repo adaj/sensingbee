@@ -12,7 +12,7 @@ from sklearn.ensemble import GradientBoostingRegressor
 import warnings
 warnings.filterwarnings('ignore')
 
-def load_data(SHAPE_FOLDER, DATA_FOLDER, spatial_features=True): # to load metadata, sfeat and sensors
+def load_data(SHAPE_FOLDER, DATA_FOLDER):
     lsoa = gpd.read_file(SHAPE_FOLDER+'Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp')
     lsoa = lsoa[lsoa['msoa11nm'].str.contains('Newcastle upon Tyne')]
     lsoa = lsoa.to_crs(fiona.crs.from_epsg(4326))
@@ -24,17 +24,15 @@ def load_data(SHAPE_FOLDER, DATA_FOLDER, spatial_features=True): # to load metad
                             crs={'init': 'epsg:4326'}).to_crs(fiona.crs.from_epsg(4326))
     metadata = gpd.sjoin(metadata, lsoa, how='inner' ,op='intersects')[['type','active','lon','lat','geometry']]
 
-    if spatial_features:
-        sfeat = pd.read_csv(DATA_FOLDER+'street_features_newcastle.csv',index_col=0)
-        sfeat = sfeat.loc[metadata.index]
-    else:
-        sfeat = pd.DataFrame()
-
+   
+    osmf = pd.read_csv(DATA_FOLDER+'street_features_newcastle.csv',index_col=0)
+    osmf = osmf.loc[metadata.index]
+   
     sensors = pd.read_csv(DATA_FOLDER+'data.csv')
     sensors['Timestamp'] = pd.to_datetime(sensors['Timestamp'])
     sensors = sensors.set_index(['Variable','Sensor Name','Timestamp'])
 
-    return metadata, sfeat, sensors
+    return metadata, osmf, sensors
 
 def load_data__(DATA_FOLDER):
     zx = pd.read_csv(DATA_FOLDER+'zx.csv')
@@ -69,9 +67,12 @@ def resampling_sensors__(zx, zi, freq):
     return zx, zi
 
 def ingestion(sensors, metadata, sfeat, variables, k, target, method):
-    zxcols = []
-    [zxcols.extend([[var]*k][0] + [["d_{}".format(var)]*k][0]) for var in variables['sensors']]
     idx = pd.IndexSlice
+    
+    zxcols = []
+    for var in variables:
+        [zxcols.append(var) for i in range(k)]
+        [zxcols.append('d_{}'.format(var)) for i in range(k)]
     zi = sensors.loc[idx[target,:,:],:]
     zx = pd.DataFrame(index=pd.MultiIndex.from_product([zi.index.get_level_values(1).unique(),zi.index.get_level_values(2).unique()],names=['Sensor Name','Timestamp']),
                       columns=zxcols)
@@ -119,9 +120,59 @@ def ingestion(sensors, metadata, sfeat, variables, k, target, method):
 
     return zx, zi
 
-def osm_features(lines, points, metadata, conf):
+def ingestion2(sensors, metadata, variables, osmf=None):
+    idx = pd.IndexSlice
+    sens_names = sensors.index.get_level_values(1).unique()
+    sens_times = sensors.index.get_level_values(2).unique()
+    zxcols = []
+    for var in variables:
+        [zxcols.append(var) for i in range(k)]
+        [zxcols.append('d_{}'.format(var)) for i in range(k)]
+    zx = pd.DataFrame(index=pd.MultiIndex.from_product([sens_names,sens_times],names=['Sensor Name','Timestamp']),
+                      columns=zxcols)
+    for s in sens_names:
+        si = metadata.loc[s]
+        for t in sens_times:
+            for var in variables:
+                sdf = sensors.loc[idx[var,:,t]] # sensors of the var variable at  time t
+                mdf = metadata.loc[sdf.index.get_level_values(1).unique()] # metadata about them
+                try:
+                    dij = mdf['geometry'].apply(lambda x: si['geometry'].distance(x)).sort_values()
+                    dij = dij.loc[(dij.index!=si.name) & (dij<0.11)].sample(k, random_state=0)
+                    dij = sdf.loc[idx[var,dij.index,t],:].join(dij)
+                    zx.loc[idx[si.name,t],'d_{}'.format(var)] = dij['geometry'].values
+                    zx.loc[idx[si.name,t],var] = dij['Value'].values
+                except:
+                    print('erro in ',s,t,var)
+                    pass
+    if sensors.index.get_level_values(2).freq == 'H':
+        zx['hour'] = zx.index.get_level_values(1).hour
+        zx['dow'] = zx.index.get_level_values(1).dayofweek
+        zx['day'] = zx.index.get_level_values(1).day
+    elif sensors.index.get_level_values(2).freq == 'D':
+        zx['dow'] = zx.index.get_level_values(1).dayofweek
+        zx['day'] = zx.index.get_level_values(1).day
+    try:
+        if osmf is not None:
+            zx = zx.reset_index(level=1).join(osmf).set_index('Timestamp', append=True)         
+    except:
+        print('Warning: osm features are not available in metadata')
+    return zx
+
+def osm_features(STREET_SHAPE_FOLDER, LSOA_SHAPE_FOLDER, metadata, conf):
+    lines = gpd.read_file(STREET_SHAPE_FOLDER+'newcastle_streets.shp')
+    points = gpd.read_file(STREET_SHAPE_FOLDER+'newcastle_points.shp')
+
     lines = lines[lines['highway'].isin(conf['lines'])]
     points = points[points['highway'].isin(conf['points'])]
+
+    lsoa = gpd.read_file(LSOA_SHAPE_FOLDER+'Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp')
+    lsoa = lsoa[lsoa['msoa11nm'].str.contains('Newcastle upon Tyne')]
+    lsoa = lsoa.to_crs(fiona.crs.from_epsg(4326))
+    lsoa.crs = {'init': 'epsg:4326', 'no_defs': True}
+
+    lines = gpd.sjoin(lines, lsoa, how='inner' ,op='intersects')[lines.columns]
+    points = gpd.sjoin(points, lsoa, how='inner' ,op='intersects')[points.columns]
 
     if conf['method'] == 'count_nn':
         ldf = pd.DataFrame(columns=conf['lines'])
