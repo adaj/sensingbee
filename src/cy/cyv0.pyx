@@ -8,7 +8,6 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn.neural_network import MLPRegressor
 from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.model_selection import RepeatedKFold
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -178,15 +177,15 @@ def osm_features(STREET_SHAPE_FOLDER, LSOA_SHAPE_FOLDER, metadata, conf):
     if conf['method'] == 'count_nn':
         ldf = pd.DataFrame(columns=conf['lines'])
         pdf = pd.DataFrame(columns=conf['points'])
-        for m in range(metadata.shape[0]):
-            i = metadata.iloc[m]
-            # distance of 0.0011 = 100m radius
-            lfeatures = lines[lines['geometry'].apply(lambda x: x.distance(i['geometry']))<conf['radius']]['highway'].value_counts().reindex(lines['highway'].unique(), fill_value=0)
-            ldf.loc[i.name] = lfeatures[l]
+        #for m in range(metadata.shape[0]):
+            #i = metadata.iloc[m]
+            ## distance of 0.0011 = 100m radius
+            #lfeatures = lines[lines['geometry'].apply(lambda x: x.distance(i['geometry']))<conf['radius']]['highway'].value_counts().reindex(lines['highway'].unique(), fill_value=0)
+            #ldf.loc[i.name] = lfeatures[l]
 
-            pfeatures = points[points['geometry'].apply(lambda x: x.distance(i['geometry']))<conf['radius']]['highway'].value_counts().reindex(points['highway'].unique(), fill_value=0)
-            pdf.loc[i.name] = pfeatures[p]
-        return pd.concat([ldf,pdf],axis=1)
+            #pfeatures = points[points['geometry'].apply(lambda x: x.distance(i['geometry']))<conf['radius']]['highway'].value_counts().reindex(points['highway'].unique(), fill_value=0)
+            #pdf.loc[i.name] = pfeatures[p]
+        #return pd.concat([ldf,pdf],axis=1)
 
     elif conf['method'] == 'distance':
         df = pd.DataFrame(columns=conf['lines']+conf['points'])
@@ -209,9 +208,6 @@ def idw_features(zx, sensor_variables):
         zidw['idw_{}'.format(var)] = (((zx['d_{}'.format(var)].values*zx[var].values).sum(axis=1))/zx['d_{}'.format(var)].values.sum(axis=1))
     return zidw
 
-def idw(zx, var, u):
-    return (np.power(zx['d_{}'.format(var)],u).values * zx[var].values).sum(axis=1) / np.power(zx['d_{}'.format(var)],u).values.sum(axis=1)
-    
 def spavg_features(zx, sensor_variables):
     zavg = pd.DataFrame(index=zx.index)
     for var in sensor_variables:
@@ -284,12 +280,3 @@ def gb(x, y, it, get_estimator):
         return grid.best_score_, grid.best_estimator_
     else:
         return grid.best_score_
-
-def kfcv(model, X, y, k=10):
-    cv_r2, cv_mse = [], []
-    for train, test in RepeatedKFold(n_splits=k, n_repeats=1).split(X):
-        model.fit(X[train],y[train])
-        X_pred = model.predict(X[test])
-        cv_r2.append(r2_score(y[test],X_pred))
-        cv_mse.append(mean_squared_error(y[test],X_pred))
-    return np.mean(cv_r2), np.std(cv_r2), np.mean(cv_mse), np.std(cv_mse)
