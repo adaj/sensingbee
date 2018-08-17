@@ -1,14 +1,13 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import geopandas as gpd
 import shapely
 import fiona
 
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import RandomizedSearchCV
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, AdaBoostRegressor
+from sklearn.model_selection import RandomizedSearchCV, RepeatedKFold, ShuffleSplit, learning_curve
 from sklearn.neural_network import MLPRegressor
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.model_selection import RepeatedKFold
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -293,3 +292,29 @@ def kfcv(model, X, y, k=10):
         cv_r2.append(r2_score(y[test],X_pred))
         cv_mse.append(mean_squared_error(y[test],X_pred))
     return np.mean(cv_r2), np.std(cv_r2), np.mean(cv_mse), np.std(cv_mse)
+
+def plot_learning_curves(model, zx, zi):
+    train_sizes, train_scores, test_scores = learning_curve(
+                                                model, zx, zi, scoring='r2', n_jobs=2,
+                                                cv=ShuffleSplit(n_splits=5, test_size=0.1, random_state=0),
+                                                train_sizes=np.linspace(.1, 1.0, 5))
+    train_scores_mean = np.mean(train_scores, axis=1)
+    train_scores_std = np.std(train_scores, axis=1)
+    test_scores_mean = np.mean(test_scores, axis=1)
+    test_scores_std = np.std(test_scores, axis=1)
+
+    plt.grid()
+    plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
+                     train_scores_mean + train_scores_std, alpha=0.3,
+                     color="r")
+    plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
+                     test_scores_mean + test_scores_std, alpha=0.3, color="g")
+    plt.plot(train_sizes, train_scores_mean, 'o-', color="r",
+             label="Training score")
+    plt.plot(train_sizes, test_scores_mean, 'o-', color="g",
+             label="Cross-validation score")
+    plt.legend(loc="best")
+    plt.title('Learning Curves', fontsize=18)
+    #plt.xlabel('n_estimators={} max_depth={}'.format(200,5))
+    plt.tight_layout()
+    plt.show()
