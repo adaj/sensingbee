@@ -8,6 +8,7 @@ import fiona
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, AdaBoostRegressor
 from sklearn.model_selection import RandomizedSearchCV, RepeatedKFold, ShuffleSplit, learning_curve
 from sklearn.neural_network import MLPRegressor
+from sklearn.preprocessing import MinMaxScaler
 
 import warnings
 warnings.filterwarnings('ignore')
@@ -318,3 +319,61 @@ def plot_learning_curves(model, zx, zi):
     #plt.xlabel('n_estimators={} max_depth={}'.format(200,5))
     plt.tight_layout()
     plt.show()
+
+def load_mesh_csv(FILE_FOLDER):
+    mesh = pd.read_csv(FILE_FOLDER,index_col=0)
+    mesh['geometry'] = [shapely.geometry.Point(xy) for xy in zip(mesh.lon, mesh.lat)]
+    return gpd.GeoDataFrame(mesh)
+
+def mesh_ingestion(sensors, metadata, osm_features, variables, mesh, timestamp):
+    idx = pd.IndexSlice
+    zxcols = []
+    for var in variables['sensors']:
+        [zxcols.append(var) for i in range(5)]
+        [zxcols.append('d_{}'.format(var)) for i in range(5)]
+
+    zmesh = pd.DataFrame(index=mesh.index, columns=zxcols)
+    timestamp = pd.to_datetime(timestamp)
+    for m in range(mesh.shape[0]):
+        i = mesh.iloc[m]
+        for var in variables['sensors']:
+            st = sensors.loc[idx[var,:,timestamp]]
+            closest = metadata.loc[st.index.get_level_values(1),'geometry'].apply(lambda x: x.distance(i['geometry'])).nsmallest(5)
+            closest = st.loc[idx[var,closest.index,timestamp],:].join(closest)
+            zmesh.loc[i.name,var] = closest['Value'].values
+            zmesh.loc[i.name,"d_{}".format(var)] = closest['geometry'].values
+    zmesh['hour'] = timestamp.hour
+    zmesh['day'] = timestamp.day
+    zmesh['dow'] = timestamp.dayofweek
+    zmesh[['primary','trunk','motorway','traffic_signals']] = osm_features
+    return zmesh
+
+def predict(zmesh, mesh, model):
+    y_pred = pd.DataFrame(np.exp(model.predict(MinMaxScaler().fit_transform(zmesh))), 
+                          index=mesh.index, columns=['pred'])
+    y_pred['lat'] = mesh['lat']
+    y_pred['lon'] = mesh['lon']
+    return y_pred
+
+def plotmesh_interpolation_newcastle(y_pred, mesh, geodf=None):   
+    lon = np.linspace(-1.8, -1.5, 50)
+    lat = np.linspace(54.95, 55.08, 50)
+    lonv, latv = np.meshgrid(lon,lat)
+    Z = np.zeros(lonv.shape[0]*lonv.shape[1]) - 9999
+    Z[mesh.index.values] = y_pred['pred'].values.ravel()
+    Z = Z.reshape(lonv.shape)
+
+    fig, axes = plt.subplots(ncols=1, nrows=1, figsize=(7,5.5))
+    if geodf is not None:
+        geodf.plot(ax=axes,color='white', edgecolor='black',linewidth=2)
+    cs = plt.contourf(lonv, latv, Z,levels=np.linspace(0, Z.max(), 20), cmap=plt.cm.Spectral_r,alpha=1, vmin = 0, vmax = 150)
+    cbar = fig.colorbar(cs)
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+from sklearn.externals import joblib
+def save_model(model, OUTPUT_FILE):
+    joblib.dump(model, OUTPUT_FILE)
+def load_model(MODEL_FILE):
+    return joblib.load(MODEL_FILE)
