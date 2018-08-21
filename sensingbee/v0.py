@@ -25,10 +25,10 @@ def load_data(SHAPE_FOLDER, DATA_FOLDER):
                             crs={'init': 'epsg:4326'}).to_crs(fiona.crs.from_epsg(4326))
     metadata = gpd.sjoin(metadata, lsoa, how='inner' ,op='intersects')[['type','active','lon','lat','geometry']]
 
-   
+
     osmf = pd.read_csv(DATA_FOLDER+'street_features_newcastle.csv',index_col=0)
     osmf = osmf.loc[metadata.index]
-   
+
     sensors = pd.read_csv(DATA_FOLDER+'data.csv')
     sensors['Timestamp'] = pd.to_datetime(sensors['Timestamp'])
     sensors = sensors.set_index(['Variable','Sensor Name','Timestamp'])
@@ -69,7 +69,7 @@ def resampling_sensors__(zx, zi, freq):
 
 def ingestion(sensors, metadata, sfeat, variables, k, target, method):
     idx = pd.IndexSlice
-    
+
     zxcols = []
     for var in variables:
         [zxcols.append(var) for i in range(k)]
@@ -155,7 +155,7 @@ def ingestion2(sensors, metadata, variables, k, osmf=None):
         zx['day'] = zx.index.get_level_values(1).day
     try:
         if osmf is not None:
-            zx = zx.reset_index(level=1).join(osmf).set_index('Timestamp', append=True)         
+            zx = zx.reset_index(level=1).join(osmf).set_index('Timestamp', append=True)
     except:
         print('Warning: osm features are not available in metadata')
     return zx
@@ -211,7 +211,7 @@ def idw_features(zx, sensor_variables):
 
 def idw(zx, var, u):
     return (np.power(zx['d_{}'.format(var)],u).values * zx[var].values).sum(axis=1) / np.power(zx['d_{}'.format(var)],u).values.sum(axis=1)
-    
+
 def spavg_features(zx, sensor_variables):
     zavg = pd.DataFrame(index=zx.index)
     for var in sensor_variables:
@@ -349,13 +349,13 @@ def mesh_ingestion(sensors, metadata, osm_features, variables, mesh, timestamp):
     return zmesh
 
 def predict(zmesh, mesh, model):
-    y_pred = pd.DataFrame(np.exp(model.predict(MinMaxScaler().fit_transform(zmesh))), 
+    y_pred = pd.DataFrame(np.exp(model.predict(MinMaxScaler().fit_transform(zmesh))),
                           index=mesh.index, columns=['pred'])
     y_pred['lat'] = mesh['lat']
     y_pred['lon'] = mesh['lon']
     return y_pred
 
-def plotmesh_interpolation_newcastle(y_pred, mesh, geodf=None):   
+def plotmesh_interpolation_newcastle(y_pred, mesh, geodf=None):
     lon = np.linspace(-1.8, -1.5, 50)
     lat = np.linspace(54.95, 55.08, 50)
     lonv, latv = np.meshgrid(lon,lat)
@@ -363,7 +363,7 @@ def plotmesh_interpolation_newcastle(y_pred, mesh, geodf=None):
     Z[mesh.index.values] = y_pred['pred'].values.ravel()
     Z = Z.reshape(lonv.shape)
 
-    fig, axes = plt.subplots(ncols=1, nrows=1, figsize=(7,5.5))
+    fig, axes = plt.subplots(ncols=1, nrows=1, figsize=(6.5,5.5))
     if geodf is not None:
         geodf.plot(ax=axes,color='white', edgecolor='black',linewidth=2)
     cs = plt.contourf(lonv, latv, Z,levels=np.linspace(0, Z.max(), 20), cmap=plt.cm.Spectral_r,alpha=1, vmin = 0, vmax = 150)
