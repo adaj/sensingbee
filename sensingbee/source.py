@@ -9,20 +9,6 @@ import shapely
 
 import sensingbee.utils
 
-configuration__ = {
-    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_allsensors_8days/',
-    'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
-    'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
-    'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
-    'Sensors__frequency':'H',
-    'Geography__filter_column':'msoa11nm',
-    'Geography__filter_label':'Newcastle upon Tyne',
-    'variables_sensors': ['NO2','Temperature'], #CO2, PM2.5, ... more on ingestion_v1
-    'variables_others': ['primary','trunk','motorway','traffic_signals','hour','day','dow']
-    'osm_line_objs': ['primary','trunk','motorway','residential'],
-    'osm_point_objs': ['traffic_signals','crossing']
-}
-
 
 class Sensors(object):
     """
@@ -217,23 +203,36 @@ class Features(object):
         self.zmesh = sensingbee.utils.mesh_ingestion(**mesh_args)
         return self.zmesh
 
+if __name__=='__main__':
+    configuration__ = {
+        'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_allsensors_8days/',
+        'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
+        'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
+        'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
+        'Sensors__frequency':'D',
+        'Geography__filter_column':'msoa11nm',
+        'Geography__filter_label':'Newcastle upon Tyne',
+        'variables_sensors': ['NO2','Temperature']#,'O3','PM2.5','NO','Pressure','Wind Direction'],
+        'osm_line_objs': ['primary','trunk','motorway','residential'],
+        'osm_point_objs': ['traffic_signals','crossing']
+    }
 
-geography = Geography(configuration__)
-sensors = Sensors(configuration__).delimit_by_geography(geography.city)
-# sensors.delimit_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv',osm_args={
-#     'Geography': geography,
-#     'input_pointdf': sensors.sensors,
-#     'line_objs': configuration__['osm_line_objs'],
-#     'point_objs': configuration__['osm_point_objs']
-# })
+    geography = Geography(configuration__)
+    sensors = Sensors(configuration__).delimit_by_geography(geography.city)
+    # sensors.delimit_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv',osm_args={
+    #     'Geography': geography,
+    #     'input_pointdf': sensors.sensors,
+    #     'line_objs': configuration__['osm_line_objs'],
+    #     'point_objs': configuration__['osm_point_objs']
+    # })
 
-features = Features(configuration__)
-# features = Features(configuration__, mode='make', make_args={
-#     'Sensors': sensors,
-#     'variables': configuration__['variables_sensors']
-# }, osm_args={
-#     'Geography': geography,
-#     'input_pointdf': sensors.sensors,
-#     'line_objs': configuration__['osm_line_objs'],
-#     'point_objs': configuration__['osm_point_objs']
-# })
+    # features = Features(configuration__)
+    features = Features(configuration__, mode='make', make_args={
+        'Sensors': sensors,
+        'variables': configuration__['variables_sensors']
+    }, osm_args={
+        'Geography': geography,
+        'input_pointdf': sensors.sensors,
+        'line_objs': configuration__['osm_line_objs'],
+        'point_objs': configuration__['osm_point_objs']
+    })

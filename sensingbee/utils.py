@@ -19,7 +19,7 @@ def ingestion2(Sensors, variables, k=5, osmf=None):
         for t in sens_times:
             for var in variables:
                 sdf = Sensors.data.loc[idx[var,:,t]] # data of the var variable at  time t
-                mdf = sensors.loc[sdf.index.get_level_values(1).unique()] # sensors about them
+                mdf = Sensors.sensors.loc[sdf.index.get_level_values(1).unique()] # sensors about them
                 try:
                     dij = mdf['geometry'].apply(lambda x: si['geometry'].distance(x)).sort_values()
                     dij = dij.loc[(dij.index!=si.name) & (dij<0.11)].sample(k, random_state=0) #0.11 = 10km
