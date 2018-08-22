@@ -74,7 +74,6 @@ class Geography(object):
     Stores geospatial elements, such as city, osm_lines and osm_points. The
     methods implemented are to ...
 
-
     """
     def __init__(self, configuration__):
         self.city = gpd.read_file(configuration__['SHAPE_PATH']+'')
@@ -111,9 +110,8 @@ class Features(object):
     Examples:
         - to instantiate by making new features
             features = Features(configuration__, mode='make', make_args={
-                'data':sensors.data,
-                'sensors':sensors.sensors,
-                'variables':configuration__['variables_sensors']
+                'Sensors': sensors,
+                'variables': configuration__['variables_sensors']
             }, osm_args={
                 'Geography': geography,
                 'input_pointdf': sensors.sensors,
@@ -129,29 +127,31 @@ class Features(object):
     """
     def __init__(self, configuration__, mode='load', make_args=None, osm_args=None):
         if mode == 'load':
-            self.zx, self.zi = self.load_csv__old(configuration__['DATA_FOLDER'])
+            self.zx, self.zi = self.load_csv__old(configuration__['DATA_FOLDER'], configuration__['Sensors__frequency'])
         elif mode == 'make':
             t0 = time.time()
             make_args['osmf'] = self.make_osm_features(**osm_args)
             make_args['osmf'].quantile(0.5).to_csv(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv')
             self.zx, self.zi = self.ingestion(make_args)
-            self.zx.to_csv(configuration__['DATA_FOLDER']+'zx.csv')
-            self.zi.to_csv(configuration__['DATA_FOLDER']+'zi.csv')
+            self.zx.to_csv(configuration__['DATA_FOLDER']+'zx_{}.csv'.format(configuration__['Sensors__frequency']))
+            self.zi.to_csv(configuration__['DATA_FOLDER']+'zi_{}.csv'.format(configuration__['Sensors__frequency']))
             print('Features ingested and saved in {} seconds',time.time()-t0)
 
     # should be updated when ingestion2 finished
-    def load_csv__old(self, DATA_FOLDER):
+    def load_csv__old(self, DATA_FOLDER, frequency):
         """
         This can only be done if ingestion have been executed a first time
         and zx.csv and zi.csv are available in DATA_FOLDER.
         """
-        self.zx = pd.read_csv(DATA_FOLDER+'zx.csv')
+        # self.zx = pd.read_csv(DATA_FOLDER+'zx.csv')
+        self.zx = pd.read_csv(DATA_FOLDER+'zx_{}.csv'.format(frequency))
         if 'Sensor Name' not in self.zx.columns:
             self.zx.rename({'Unnamed: 0':'Sensor Name'}, axis='columns', inplace=True)
         self.zx['Timestamp'] = pd.to_datetime(self.zx['Timestamp'])
         self.zx.set_index(['Sensor Name','Timestamp'], inplace=True)
         self.zx.rename(columns={key:key.split('.')[0] for key in self.zx.columns if '.' in key}, inplace=True)
-        self.zi = pd.read_csv(DATA_FOLDER+'zi.csv')
+        # self.zi = pd.read_csv(DATA_FOLDER+'zi.csv')
+        self.zi = pd.read_csv(DATA_FOLDER+'zi_{}.csv'.format(frequency))
         self.zi['Timestamp'] = pd.to_datetime(self.zi['Timestamp'])
         self.zi.set_index(['Sensor Name','Timestamp'], inplace=True)
         return self.zx, self.zi
@@ -193,8 +193,8 @@ class Features(object):
         return sensingbee.utils.ingestion2(**make_args)
 
     def get_train_features(self, variable):
-        var_y = self.zi.loc[self.zi['Variable']==variable]
-        var_x = self.zx.loc[var_y.index]
+        var_y = self.zi.loc[self.zi['Variable']==variable,'Value']
+        var_x = self.zx.loc[var_y.index].dropna(axis='columns')
         return var_x, var_y
 
     def mesh_ingestion(self, mesh_args, osm_args):
@@ -203,36 +203,87 @@ class Features(object):
         self.zmesh = sensingbee.utils.mesh_ingestion(**mesh_args)
         return self.zmesh
 
-if __name__=='__main__':
-    configuration__ = {
-        'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_allsensors_8days/',
-        'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
-        'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
-        'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
-        'Sensors__frequency':'D',
-        'Geography__filter_column':'msoa11nm',
-        'Geography__filter_label':'Newcastle upon Tyne',
-        'variables_sensors': ['NO2','Temperature']#,'O3','PM2.5','NO','Pressure','Wind Direction'],
-        'osm_line_objs': ['primary','trunk','motorway','residential'],
-        'osm_point_objs': ['traffic_signals','crossing']
-    }
 
-    geography = Geography(configuration__)
-    sensors = Sensors(configuration__).delimit_by_geography(geography.city)
-    # sensors.delimit_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv',osm_args={
-    #     'Geography': geography,
-    #     'input_pointdf': sensors.sensors,
-    #     'line_objs': configuration__['osm_line_objs'],
-    #     'point_objs': configuration__['osm_point_objs']
-    # })
+class Model(object):
+    def __init__(self, regressor):
+        self.regressor = regressor
+    def fit(self, var_x, var_y):
+        X = MinMaxScaler().fit_transform(var_x)
+        y = var_y.ravel()
+        cv_r2, cv_mse = [], []
+        for train, test in RepeatedKFold(n_splits=10, n_repeats=1).split(X):
+            self.regressor.fit(X[train],y[train])
+            X_pred = model.predict(X[test])
+            cv_r2.append(r2_score(y[test],X_pred))
+            cv_mse.append(mean_squared_error(y[test],X_pred))
+        self.r2, self.r2_std = np.mean(cv_r2), np.std(cv_r2)
+        self.mse, self.mse_std = np.mean(cv_mse), np.std(cv_mse)
+        return self
+    # def predict(self, )
 
-    # features = Features(configuration__)
-    features = Features(configuration__, mode='make', make_args={
-        'Sensors': sensors,
-        'variables': configuration__['variables_sensors']
-    }, osm_args={
-        'Geography': geography,
-        'input_pointdf': sensors.sensors,
-        'line_objs': configuration__['osm_line_objs'],
-        'point_objs': configuration__['osm_point_objs']
-    })
+
+
+
+# if __name__=='__main__':
+configuration__ = {
+    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_30days/',
+    'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
+    'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
+    'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
+    'Sensors__frequency':'D',
+    'Geography__filter_column':'msoa11nm',
+    'Geography__filter_label':'Newcastle upon Tyne',
+    'variables_sensors': ['NO2','Temperature'],#,'O3','PM2.5','NO','Pressure','Wind Direction'],
+    'osm_line_objs': ['primary','trunk','motorway','residential'],
+    'osm_point_objs': ['traffic_signals','crossing']
+}
+
+geography = Geography(configuration__)
+sensors = Sensors(configuration__).delimit_by_geography(geography.city)
+# sensors.delimit_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv',osm_args={
+#     'Geography': geography,
+#     'input_pointdf': sensors.sensors,
+#     'line_objs': configuration__['osm_line_objs'],
+#     'point_objs': configuration__['osm_point_objs']
+# })
+
+features = Features(configuration__)
+var_x, var_y = features.get_train_features('Temperature')
+
+
+
+
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import learning_curve
+from sklearn.model_selection import ShuffleSplit
+import matplotlib.pyplot as plt
+
+zxs = MinMaxScaler().fit_transform(var_x)
+gb = GradientBoostingRegressor(n_estimators=200, max_depth=3, max_features=None)#.fit(zxs,var_y.ravel())
+
+train_sizes, train_scores, test_scores = learning_curve(
+                                            gb, zxs,var_y.ravel(), scoring='r2', n_jobs=2,
+                                            cv=ShuffleSplit(n_splits=3, test_size=0.1, random_state=0),
+                                            train_sizes=np.linspace(.1, 1.0, 4))
+
+train_scores_mean = np.mean(train_scores, axis=1)
+train_scores_std = np.std(train_scores, axis=1)
+test_scores_mean = np.mean(test_scores, axis=1)
+test_scores_std = np.std(test_scores, axis=1)
+
+plt.grid()
+plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
+                 train_scores_mean + train_scores_std, alpha=0.3,
+                 color="r")
+plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
+                 test_scores_mean + test_scores_std, alpha=0.3, color="g")
+plt.plot(train_sizes, train_scores_mean, 'o-', color="r",
+         label="Training score")
+plt.plot(train_sizes, test_scores_mean, 'o-', color="g",
+         label="Cross-validation score")
+plt.legend(loc="best")
+plt.title('Learning Curves', fontsize=18)
+#plt.xlabel('n_estimators={} max_depth={}'.format(200,5))
+plt.tight_layout()
+plt.show()
