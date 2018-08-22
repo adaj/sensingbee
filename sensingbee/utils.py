@@ -3,8 +3,6 @@ import numpy as np
 
 
 def ingestion2(Sensors, variables, k=5, osmf=None):
-    # this function is very slow and is needed to produce zx.csv and zi.csv
-    # for the first time.
     idx = pd.IndexSlice
     sens_names = Sensors.data.index.get_level_values(1).unique()
     sens_times = Sensors.data.index.get_level_values(2).unique()
@@ -40,25 +38,23 @@ def ingestion2(Sensors, variables, k=5, osmf=None):
         zx = zx.reset_index(level=1).join(osmf).set_index('Timestamp', append=True)
     return zx, Sensors.data
 
-
-def mesh_ingestion(Sensors, osm_features, variables, mesh, timestamp):
+def mesh_ingestion(Sensors, variables, meshgrid, timestamp):
     idx = pd.IndexSlice
     zxcols = []
     for var in variables['sensors']:
         [zxcols.append(var) for i in range(5)]
         [zxcols.append('d_{}'.format(var)) for i in range(5)]
-    zmesh = pd.DataFrame(index=mesh.index, columns=zxcols)
+    zmesh = pd.DataFrame(index=meshgrid.index, columns=zxcols)
     timestamp = pd.to_datetime(timestamp)
-    for m in range(mesh.shape[0]):
-        i = mesh.iloc[m]
+    for m in range(meshgrid.shape[0]):
+        i = meshgrid.iloc[m]
         for var in variables['sensors']:
             st = Sensors.data.loc[idx[var,:,timestamp]]
             closest = Sensors.sensors.loc[st.index.get_level_values(1),'geometry'].apply(lambda x: x.distance(i['geometry'])).nsmallest(5)
             closest = st.loc[idx[var,closest.index,timestamp],:].join(closest)
             zmesh.loc[i.name,var] = closest['Value'].values
             zmesh.loc[i.name,"d_{}".format(var)] = closest['geometry'].values
-    zmesh['hour'] = timestamp.hour
     zmesh['day'] = timestamp.day
     zmesh['dow'] = timestamp.dayofweek
-    zmesh[['primary','trunk','motorway','traffic_signals']] = osm_features
+    zmesh = zmesh.join(meshgrid[variables['osm']])
     return zmesh

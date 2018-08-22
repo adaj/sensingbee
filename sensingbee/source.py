@@ -2,10 +2,16 @@ import time
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 import geopandas as gpd
 import fiona
 import shapely
+
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, AdaBoostRegressor
+from sklearn.model_selection import RandomizedSearchCV, RepeatedKFold, learning_curve
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import r2_score, mean_squared_error
 
 import sensingbee.utils
 
@@ -41,22 +47,22 @@ class Sensors(object):
         self.sensors = self.sensors.loc[self.data.index.get_level_values(1).unique()]
         self.data, self.sensors = self.resample_by_frequency(configuration__['Sensors__frequency'])
 
-    def delimit_by_geography(self, geography_city):
+    def delimit_sensors_by_geography(self, geography_city):
         idx = pd.IndexSlice
+        self.sensors.crs = self.city.crs
         self.sensors = gpd.sjoin(self.sensors, geography_city, how='inner' ,op='intersects')[self.sensors.columns]
         self.data = self.data.loc[idx[:,self.sensors.index,:],:]
         return self
 
-    def delimit_by_osm_quantile(self, QUANTILES_PATH=None, osm_args=None):
+    def delimit_sensors_by_osm_quantile(self, QUANTILES_PATH, osm_args):
         idx = pd.IndexSlice
-        if QUANTILES_PATH is not None and osm_args is not None:
-            osm_df = Features({},mode=None).make_osm_features(**osm_args)
-            l = len(osm_df)
-            quantiles = pd.read_csv(QUANTILES_PATH, index_col=0, header=-1, squeeze=True)
-            osm_df = osm_df.loc[osm_df.apply(lambda x: True if np.any(x>quantiles) else False, axis=1)]
-            self.sensors = self.sensors.loc[osm_df.index]
-            self.data = self.data.loc[idx[:,osm_df.index,:],:]
-            self.dropped_sensors = l-len(osm_df)
+        osm_df = Features({},mode=None).make_osm_features(**osm_args)
+        l = len(osm_df)
+        quantiles = pd.read_csv(QUANTILES_PATH, index_col=0, header=-1, squeeze=True)
+        osm_df = osm_df.loc[osm_df.apply(lambda x: True if np.any(x>quantiles) else False, axis=1)]
+        self.sensors = self.sensors.loc[osm_df.index]
+        self.data = self.data.loc[idx[:,osm_df.index,:],:]
+        self.dropped_sensors = l-len(osm_df)
         return self
 
     def resample_by_frequency(self, frequency):
@@ -75,28 +81,63 @@ class Geography(object):
     methods implemented are to ...
 
     """
-    def __init__(self, configuration__):
+    def __init__(self, configuration__, mode='load'):
         self.city = gpd.read_file(configuration__['SHAPE_PATH']+'')
         self.city = self.filter_by_label(configuration__['Geography__filter_column'],configuration__['Geography__filter_label'])
         self.city = self.city.to_crs(fiona.crs.from_epsg(4326))
         self.city.crs = {'init': 'epsg:4326', 'no_defs': True}
         self.city = gpd.GeoDataFrame(geometry=gpd.GeoSeries(shapely.ops.cascaded_union(self.city['geometry'])))
-        self.load_OSM_objects(configuration__['OSM_FOLDER'])
+        if mode=='make':
+            self.load_OSM_objects(configuration__['OSM_FOLDER'])
+            self.make_meshgrid(**configuration__['Geography__meshgrid'])
+            self.delimit_meshgrid_by_quantiles(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv', {
+                'Geography': self,
+                'input_pointdf': self.meshgrid,
+                'line_objs': configuration__['osm_line_objs'],
+                'point_objs': configuration__['osm_point_objs']
+            }).to_csv(configuration__['DATA_FOLDER']+'mesh_valid-regions.csv')
+        elif mode=='load':
+            self.load_meshgrid_csv(configuration__['DATA_FOLDER']+'mesh_valid-regions.csv')
 
     def filter_by_label(self, column, label):
         return self.city[self.city[column].str.contains(label)]
 
     def load_OSM_objects(self, OSM_FOLDER):
         self.lines = gpd.read_file(OSM_FOLDER+'newcastle_streets.shp')
+        self.lines.crs = self.city.crs
         self.lines = gpd.sjoin(self.lines, self.city, how='inner', op='intersects')[self.lines.columns]
         self.points = gpd.read_file(OSM_FOLDER+'newcastle_points.shp')
+        self.points.crs = self.city.crs
         self.points = gpd.sjoin(self.points, self.city, how='inner', op='intersects')[self.points.columns]
         return self
 
-    def load_meshgrid_validregions(self, VALIDREGIONS_FILE):
-        self.vr = pd.read_csv(VALIDREGIONS_FILE, index_col=0)
-        self.vr['geometry'] = [shapely.geometry.Point(xy) for xy in zip(self.vr['lon'], self.vr['lat'])]
-        return gpd.GeoDataFrame(self.vr, geometry=self.vr['geometry'])
+    def make_meshgrid(self, dimensions, longitude_range, latitude_range, delimit=False):
+        self.meshdimensions = dimensions
+        self.longitude_range = longitude_range
+        self.latitude_range = latitude_range
+        self.meshlonv, self.meshlatv = np.meshgrid(np.linspace(longitude_range[0], longitude_range[1], dimensions[0]),
+                                 np.linspace(latitude_range[0], latitude_range[1], dimensions[1]))
+        self.meshgrid = np.vstack([self.meshlonv.ravel(), self.meshlatv.ravel()]).T
+        self.meshgrid = gpd.GeoDataFrame(self.meshgrid, geometry=[shapely.geometry.Point(xy) for xy in self.meshgrid],crs={'init': 'epsg:4326'})
+        self.meshgrid.rename(columns={0:'lon',1:'lat'}, inplace=True)
+        self.meshgrid.crs = self.city.crs
+        self.meshgrid = gpd.sjoin(self.meshgrid, self.city, how='inner', op='intersects')[self.meshgrid.columns]
+        return self
+
+    def delimit_meshgrid_by_quantiles(self, QUANTILES_PATH, osm_args):
+        idx = pd.IndexSlice
+        osm_df = Features({},mode=None).make_osm_features(**osm_args)
+        l = len(osm_df)
+        quantiles = pd.read_csv(QUANTILES_PATH, index_col=0, header=-1, squeeze=True)
+        osm_df = osm_df.loc[osm_df.apply(lambda x: True if np.any(x>quantiles) else False, axis=1)]
+        self.meshgrid = self.meshgrid.loc[osm_df.index].join(osm_df)
+        return self.meshgrid
+
+    def load_meshgrid_csv(self, MESHGRID_PATH):
+        self.meshgrid = pd.read_csv(MESHGRID_PATH, index_col=0)
+        self.meshgrid['geometry'] = [shapely.geometry.Point(xy) for xy in zip(self.meshgrid['lon'], self.meshgrid['lat'])]
+        self.meshgrid = gpd.GeoDataFrame(self.meshgrid)
+        return self
 
 
 class Features(object):
@@ -195,95 +236,123 @@ class Features(object):
     def get_train_features(self, variable):
         var_y = self.zi.loc[self.zi['Variable']==variable,'Value']
         var_x = self.zx.loc[var_y.index].dropna(axis='columns')
-        return var_x, var_y
+        return {'X':var_x, 'y': var_y}
 
-    def mesh_ingestion(self, mesh_args, osm_args):
-        # mesh_args['mesh'] =
-        # mesh_args['osm_features'] = self.make_osm_features(osm_args)
-        self.zmesh = sensingbee.utils.mesh_ingestion(**mesh_args)
-        return self.zmesh
+    # def mesh_ingestion(self, ):
+    #     return sensingbee.utils.mesh_ingestion()
+
 
 
 class Model(object):
+    """
+    """
     def __init__(self, regressor):
         self.regressor = regressor
-    def fit(self, var_x, var_y):
+
+    def load_model(self, MODEL_FILE):
+        return joblib.load(MODEL_FILE)
+
+    def save_model(self, MODEL_FILE):
+        joblib.dump(self.regressor, OUTPUT_FILE)
+
+    def fit(self, X, y):
         X = MinMaxScaler().fit_transform(var_x)
         y = var_y.ravel()
         cv_r2, cv_mse = [], []
         for train, test in RepeatedKFold(n_splits=10, n_repeats=1).split(X):
             self.regressor.fit(X[train],y[train])
-            X_pred = model.predict(X[test])
+            X_pred = self.regressor.predict(X[test])
             cv_r2.append(r2_score(y[test],X_pred))
             cv_mse.append(mean_squared_error(y[test],X_pred))
         self.r2, self.r2_std = np.mean(cv_r2), np.std(cv_r2)
         self.mse, self.mse_std = np.mean(cv_mse), np.std(cv_mse)
         return self
-    # def predict(self, )
+
+    def predict(self, X_mesh, Geography, plot=False):
+        y_pred = pd.DataFrame(self.regressor.predict(MinMaxScaler().fit_transform(zmesh)),
+                              index=Geography.meshgrid.index, columns=['pred'])
+        y_pred['lat'] = Geography.meshgrid['lat']
+        y_pred['lon'] = Geography.meshgrid['lon']
+        if plot:
+            plot_interpolation(y_pred, Geography)
+        return y_pred
+
+    def plot_interpolation(self, y_pred, Geography, vmin=0, vmax=150):
+        Z = np.zeros(Geography.meshlonv.shape[0]*Geography.meshlonv.shape[1]) - 9999
+        Z[Geography.meshgrid.index.values] = y_pred['pred'].values.ravel()
+        Z = Z.reshape(Geography.meshlonv.shape)
+        fig, axes = plt.subplots(ncols=1, nrows=1, figsize=(6.5,5.5))
+        Geography.city.plot(ax=axes, color='white', edgecolor='black', linewidth=2)
+        cs = plt.contourf(Geography.meshlonv, Geography.meshlatv, Z,
+                          levels=np.linspace(0, Z.max(), 20), cmap=plt.cm.Spectral_r, alpha=1, vmin=vmin, vmax=vmax)
+        cbar = fig.colorbar(cs)
+        plt.axis('off')
+        plt.tight_layout()
+        plt.show()
 
 
+class Bee(object):
+    def __init__(self, configuration__, mode='load'):
+        if mode=='make':
+            self.geography = Geography(configuration__, mode)
+            sensors = Sensors(configuration__).delimit_sensors_by_geography(geography.city)
+            sensors.delimit_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv',osm_args={
+                'Geography': geography,
+                'input_pointdf': sensors.sensors,
+                'line_objs': configuration__['osm_line_objs'],
+                'point_objs': configuration__['osm_point_objs']
+            })
+            self.features = Features(configuration__, mode, make_args={
+                'Sensors': sensors,
+                'variables': configuration__['variables_sensors']
+            }, osm_args={
+                'Geography': self.geography,
+                'input_pointdf': sensors.sensors,
+                'line_objs': configuration__['osm_line_objs'],
+                'point_objs': configuration__['osm_point_objs']
+            })
+        elif mode=='load':
+            self.geography = Geography(configuration__)
+            self.features = Features(configuration__)
+    # def predict(self, variable, plot=True):
 
 
-# if __name__=='__main__':
-configuration__ = {
-    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_30days/',
-    'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
-    'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
-    'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
-    'Sensors__frequency':'D',
-    'Geography__filter_column':'msoa11nm',
-    'Geography__filter_label':'Newcastle upon Tyne',
-    'variables_sensors': ['NO2','Temperature'],#,'O3','PM2.5','NO','Pressure','Wind Direction'],
-    'osm_line_objs': ['primary','trunk','motorway','residential'],
-    'osm_point_objs': ['traffic_signals','crossing']
-}
+if __name__=='__main__':
+    configuration__ = {
+        'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_30days/',
+        'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
+        'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
+        'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
+        'Sensors__frequency':'D',
+        'Geography__filter_column':'msoa11nm',
+        'Geography__filter_label':'Newcastle upon Tyne',
+        'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.5], 'latitude_range':[54.95, 55.08]},
+        'variables_sensors': ['NO2','Temperature'],#,'O3','PM2.5','NO','Pressure','Wind Direction'],
+        'osm_line_objs': ['primary','trunk','motorway','residential'],
+        'osm_point_objs': ['traffic_signals','crossing']
+    }
 
-geography = Geography(configuration__)
-sensors = Sensors(configuration__).delimit_by_geography(geography.city)
-# sensors.delimit_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv',osm_args={
-#     'Geography': geography,
-#     'input_pointdf': sensors.sensors,
-#     'line_objs': configuration__['osm_line_objs'],
-#     'point_objs': configuration__['osm_point_objs']
-# })
+    geography = Geography(configuration__)
 
-features = Features(configuration__)
-var_x, var_y = features.get_train_features('Temperature')
+    # sensors = Sensors(configuration__).delimit_sensors_by_geography(geography.city)
+    # sensors.delimit_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv',osm_args={
+    #     'Geography': geography,
+    #     'input_pointdf': sensors.sensors,
+    #     'line_objs': configuration__['osm_line_objs'],
+    #     'point_objs': configuration__['osm_point_objs']
+    # })
 
+    features = Features(configuration__)
+    # features = Features(configuration__, mode='make', make_args={
+    #     'Sensors': sensors,
+    #     'variables': configuration__['variables_sensors']
+    # }, osm_args={
+    #     'Geography': geography,
+    #     'input_pointdf': sensors.sensors,
+    #     'line_objs': configuration__['osm_line_objs'],
+    #     'point_objs': configuration__['osm_point_objs']
+    # })
 
-
-
-from sklearn.ensemble import GradientBoostingRegressor
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import learning_curve
-from sklearn.model_selection import ShuffleSplit
-import matplotlib.pyplot as plt
-
-zxs = MinMaxScaler().fit_transform(var_x)
-gb = GradientBoostingRegressor(n_estimators=200, max_depth=3, max_features=None)#.fit(zxs,var_y.ravel())
-
-train_sizes, train_scores, test_scores = learning_curve(
-                                            gb, zxs,var_y.ravel(), scoring='r2', n_jobs=2,
-                                            cv=ShuffleSplit(n_splits=3, test_size=0.1, random_state=0),
-                                            train_sizes=np.linspace(.1, 1.0, 4))
-
-train_scores_mean = np.mean(train_scores, axis=1)
-train_scores_std = np.std(train_scores, axis=1)
-test_scores_mean = np.mean(test_scores, axis=1)
-test_scores_std = np.std(test_scores, axis=1)
-
-plt.grid()
-plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
-                 train_scores_mean + train_scores_std, alpha=0.3,
-                 color="r")
-plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
-                 test_scores_mean + test_scores_std, alpha=0.3, color="g")
-plt.plot(train_sizes, train_scores_mean, 'o-', color="r",
-         label="Training score")
-plt.plot(train_sizes, test_scores_mean, 'o-', color="g",
-         label="Cross-validation score")
-plt.legend(loc="best")
-plt.title('Learning Curves', fontsize=18)
-#plt.xlabel('n_estimators={} max_depth={}'.format(200,5))
-plt.tight_layout()
-plt.show()
+    model_temp = Model(
+        GradientBoostingRegressor(n_estimators=200, max_depth=3, max_features=None)
+    ).fit(**features.get_train_features('Temperature'))
