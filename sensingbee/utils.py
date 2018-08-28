@@ -38,23 +38,27 @@ def ingestion2(Sensors, variables, k=5, osmf=None):
         zx = zx.reset_index(level=1).join(osmf).set_index('Timestamp', append=True)
     return zx, Sensors.data
 
-def mesh_ingestion(Sensors, variables, meshgrid, timestamp):
+def mesh_ingestion(Sensors, meshgrid, variables, timestamp):
     idx = pd.IndexSlice
-    zxcols = []
-    for var in variables['sensors']:
-        [zxcols.append(var) for i in range(5)]
-        [zxcols.append('d_{}'.format(var)) for i in range(5)]
-    zmesh = pd.DataFrame(index=meshgrid.index, columns=zxcols)
     timestamp = pd.to_datetime(timestamp)
-    for m in range(meshgrid.shape[0]):
-        i = meshgrid.iloc[m]
-        for var in variables['sensors']:
+    zxcols = []
+    for var in variables:
+        [zxcols.append(var.split('.')[0]) for i in range(5)]
+        [zxcols.append('d_{}'.format(var.split('.')[0])) for i in range(5)]
+    zmesh = pd.DataFrame(index=meshgrid.index, columns=zxcols)
+    def loop_var(i):
+        values = []
+        for var in variables:
             st = Sensors.data.loc[idx[var,:,timestamp]]
             closest = Sensors.sensors.loc[st.index.get_level_values(1),'geometry'].apply(lambda x: x.distance(i['geometry'])).nsmallest(5)
             closest = st.loc[idx[var,closest.index,timestamp],:].join(closest)
-            zmesh.loc[i.name,var] = closest['Value'].values
-            zmesh.loc[i.name,"d_{}".format(var)] = closest['geometry'].values
-    zmesh['day'] = timestamp.day
+
+            values += list(closest['Value'].values)
+            values += list(closest['geometry'].values)
+        zmesh.loc[i.name] = values
+    meshgrid.apply(lambda x: loop_var(x), axis=1)
+
     zmesh['dow'] = timestamp.dayofweek
-    zmesh = zmesh.join(meshgrid[variables['osm']])
+    zmesh['day'] = timestamp.day
+    zmesh = zmesh.join(meshgrid[meshgrid.columns[~meshgrid.columns.isin(['lat','lon','geometry'])]])
     return zmesh

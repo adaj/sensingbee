@@ -34,35 +34,74 @@ class Sensors(object):
     index = []
     """
 
-    def __init__(self, configuration__):
-        idx = pd.IndexSlice
-        self.sensors = pd.read_csv(configuration__['DATA_FOLDER']+'sensors.csv',index_col='name')
-        self.sensors = gpd.GeoDataFrame(self.sensors[['type','active','lon','lat']],
-                                geometry=[shapely.geometry.Point(xy) for xy in zip(self.sensors['lon'], self.sensors['lat'])],
-                                crs={'init': 'epsg:4326'}).to_crs(fiona.crs.from_epsg(4326))
-        self.data = pd.read_csv(configuration__['DATA_FOLDER']+'data.csv')
-        self.data['Timestamp'] = pd.to_datetime(self.data['Timestamp'])
-        self.data = self.data.set_index(['Variable','Sensor Name','Timestamp'])
-        self.data = self.data.loc[idx[configuration__['variables_sensors']],:]
-        self.sensors = self.sensors.loc[self.data.index.get_level_values(1).unique()]
-        self.data, self.sensors = self.resample_by_frequency(configuration__['Sensors__frequency'])
+    def __init__(self, configuration__, mode='load', delimit_geography=None, delimit_quantiles=True):
+        if mode=='make':
+            idx = pd.IndexSlice
+            self.sensors = pd.read_csv(configuration__['DATA_FOLDER']+'sensors.csv',index_col='name')
+            self.sensors = gpd.GeoDataFrame(self.sensors[['type','active','lon','lat']],
+                                    geometry=[shapely.geometry.Point(xy) for xy in zip(self.sensors['lon'], self.sensors['lat'])],
+                                    crs={'init': 'epsg:4326'}).to_crs(fiona.crs.from_epsg(4326))
+            self.data = pd.read_csv(configuration__['DATA_FOLDER']+'data.csv')
+            self.data['Timestamp'] = pd.to_datetime(self.data['Timestamp'])
+            self.data = self.data.set_index(['Variable','Sensor Name','Timestamp'])
+            self.data = self.data.loc[idx[configuration__['Sensors__variables']],:]
+            self.sensors = self.sensors.loc[self.data.index.get_level_values(1).unique()]
+            self.data, self.sensors = self.resample_by_frequency(configuration__['Sensors__frequency'])
+            if delimit_geography is not None:
+                self.delimit_sensors_by_geography(delimit_geography.city)
+            # if delimit_quantiles:
+            #     self.delimit_sensors_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv', osm_args={
+            #         'Geography': delimit_geography,
+            #         'line_objs': configuration__['Features__osm_line_objs'],
+            #         'point_objs': configuration__['Features__osm_point_objs']
+            #     })
+            # self.delimit_data_by_threshold(t_dict = {
+            #     'O3':40,
+            #     'Temperature':25,
+            #     'NO2':100,
+            #     'PM2.5':15
+            # })
+            self.data.to_csv(configuration__['DATA_FOLDER']+'data__.csv')
+            self.sensors.to_csv(configuration__['DATA_FOLDER']+'sensors__.csv')
+        if mode=='load':
+            self.sensors = pd.read_csv(configuration__['DATA_FOLDER']+'sensors__.csv', index_col=0)
+            self.sensors = gpd.GeoDataFrame(self.sensors, geometry=[shapely.geometry.Point(xy) for xy in zip(self.sensors['lon'], self.sensors['lat'])])
+            self.data = pd.read_csv(configuration__['DATA_FOLDER']+'data__.csv')
+            self.data['Timestamp'] = pd.to_datetime(self.data['Timestamp'])
+            self.data = self.data.set_index(['Variable','Sensor Name','Timestamp'])
 
     def delimit_sensors_by_geography(self, geography_city):
         idx = pd.IndexSlice
-        self.sensors.crs = self.city.crs
+        self.sensors.crs = geography_city.crs
         self.sensors = gpd.sjoin(self.sensors, geography_city, how='inner' ,op='intersects')[self.sensors.columns]
         self.data = self.data.loc[idx[:,self.sensors.index,:],:]
         return self
 
     def delimit_sensors_by_osm_quantile(self, QUANTILES_PATH, osm_args):
         idx = pd.IndexSlice
+        osm_args['input_pointdf'] = self.sensors
         osm_df = Features({},mode=None).make_osm_features(**osm_args)
         l = len(osm_df)
         quantiles = pd.read_csv(QUANTILES_PATH, index_col=0, header=-1, squeeze=True)
         osm_df = osm_df.loc[osm_df.apply(lambda x: True if np.any(x>quantiles) else False, axis=1)]
         self.sensors = self.sensors.loc[osm_df.index]
         self.data = self.data.loc[idx[:,osm_df.index,:],:]
-        self.dropped_sensors = l-len(osm_df)
+        return self
+
+    def delimit_data_by_threshold(self, t_dict):
+        off, self.dropped_sensors, self.dropped_data = {}, {}, {}
+        for var, threshold in t_dict.items():
+            if var!='Temperature':
+                D = self.data.loc[var]['Value'].loc[self.data.loc[var]['Value']>0]
+            else:
+                D = self.data.loc[var]['Value']
+            off[var] = []
+            for i,si in enumerate(D.index.get_level_values(0).unique()):
+                if D.loc[si].mean() > threshold:
+                    off[var].append((var,si))
+            self.dropped_sensors[var] = len(off[var])/i
+            self.dropped_data[var] = 1 - (self.data.drop(off[var]).loc[var].shape[0]/self.data.loc[var].shape[0])
+            self.data = self.data.drop(off[var])
         return self
 
     def resample_by_frequency(self, frequency):
@@ -87,14 +126,14 @@ class Geography(object):
         self.city = self.city.to_crs(fiona.crs.from_epsg(4326))
         self.city.crs = {'init': 'epsg:4326', 'no_defs': True}
         self.city = gpd.GeoDataFrame(geometry=gpd.GeoSeries(shapely.ops.cascaded_union(self.city['geometry'])))
+        self.load_OSM_objects(configuration__['OSM_FOLDER'])
+        self.make_meshgrid(**configuration__['Geography__meshgrid'])
         if mode=='make':
-            self.load_OSM_objects(configuration__['OSM_FOLDER'])
-            self.make_meshgrid(**configuration__['Geography__meshgrid'])
             self.delimit_meshgrid_by_quantiles(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv', {
                 'Geography': self,
                 'input_pointdf': self.meshgrid,
-                'line_objs': configuration__['osm_line_objs'],
-                'point_objs': configuration__['osm_point_objs']
+                'line_objs': configuration__['Features__osm_line_objs'],
+                'point_objs': configuration__['Features__osm_point_objs']
             }).to_csv(configuration__['DATA_FOLDER']+'mesh_valid-regions.csv')
         elif mode=='load':
             self.load_meshgrid_csv(configuration__['DATA_FOLDER']+'mesh_valid-regions.csv')
@@ -152,12 +191,12 @@ class Features(object):
         - to instantiate by making new features
             features = Features(configuration__, mode='make', make_args={
                 'Sensors': sensors,
-                'variables': configuration__['variables_sensors']
+                'variables': configuration__['Sensors__variables']
             }, osm_args={
                 'Geography': geography,
                 'input_pointdf': sensors.sensors,
-                'line_objs': configuration__['osm_line_objs'],
-                'point_objs': configuration__['osm_point_objs']
+                'line_objs': configuration__['Features__osm_line_objs'],
+                'point_objs': configuration__['Features__osm_point_objs']
             })
         - to instantiate by loading zx and zi
             features = Features(configuration__)
@@ -166,14 +205,20 @@ class Features(object):
             t_x, t_y = features.get_train_features('Temperature')
             co_x, co_y = features.get_train_features('CO')
     """
-    def __init__(self, configuration__, mode='load', make_args=None, osm_args=None):
+    def __init__(self, configuration__, mode='load', Sensors=None, Geography=None):
         if mode == 'load':
             self.zx, self.zi = self.load_csv__old(configuration__['DATA_FOLDER'], configuration__['Sensors__frequency'])
+            self.zx.rename({'PM2':'PM2.5','d_PM2':'d_PM2.5','PM1':'PM1.0','d_PM1':'d_PM1.0'},axis='columns',inplace=True)
+            self.zx.dropna(axis='columns',inplace=True)
+            self.zi = self.zi.set_index('Variable',append=True).swaplevel(1,2).swaplevel(0,1)
         elif mode == 'make':
             t0 = time.time()
-            make_args['osmf'] = self.make_osm_features(**osm_args)
-            make_args['osmf'].quantile(0.5).to_csv(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv')
-            self.zx, self.zi = self.ingestion(make_args)
+            osm_features = self.make_osm_features(Geography, Sensors.sensors,
+                                        configuration__['Features__osm_line_objs'],
+                                        configuration__['Features__osm_point_objs'])
+            osm_features.quantile(0.5).to_csv(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv')
+            self.zx, self.zi = sensingbee.utils.ingestion2(Sensors, configuration__['Sensors__variables'], k=5, osmf=osm_features)
+            self.zx.dropna(axis='columns',inplace=True)
             self.zx.to_csv(configuration__['DATA_FOLDER']+'zx_{}.csv'.format(configuration__['Sensors__frequency']))
             self.zi.to_csv(configuration__['DATA_FOLDER']+'zi_{}.csv'.format(configuration__['Sensors__frequency']))
             print('Features ingested and saved in {} seconds',time.time()-t0)
@@ -225,22 +270,25 @@ class Features(object):
             osmf.loc[i.name] = d
         return osmf
 
-    def ingestion(self, make_args):
-        """
-        This is a very slow function, could run for days and should be
-        used only for the first time that data is imported, as __init__
-        saves the result in zx.csv and zi.csv
-        """
-        return sensingbee.utils.ingestion2(**make_args)
-
     def get_train_features(self, variable):
-        var_y = self.zi.loc[self.zi['Variable']==variable,'Value']
-        var_x = self.zx.loc[var_y.index].dropna(axis='columns')
+        var_y = self.zi.loc[variable]
+        var_x = self.zx.loc[var_y.index]
         return {'X':var_x, 'y': var_y}
 
-    # def mesh_ingestion(self, ):
-    #     return sensingbee.utils.mesh_ingestion()
-
+    def mesh_ingestion(self, Sensors, Geography, variables, timestamp=None):
+        if timestamp is None: #'take all period of Sensors.data'
+            X_mesh = pd.DataFrame()
+            for t in Sensors.data.index.get_level_values(2).unique():
+                zmesh = sensingbee.utils.mesh_ingestion(Sensors, Geography.meshgrid, variables, t)
+                zmesh['Timestamp'] = t
+                zmesh = zmesh.set_index('Timestamp',append=True).swaplevel(0,1)
+                X_mesh = X_mesh.append(zmesh)
+        else:
+            zmesh = sensingbee.utils.mesh_ingestion(Sensors, Geography.meshgrid, variables, timestamp)
+            zmesh['Timestamp'] = timestamp
+            zmesh = zmesh.set_index('Timestamp',append=True).swaplevel(0,1)
+            X_mesh = zmesh
+        return X_mesh
 
 
 class Model(object):
@@ -256,8 +304,8 @@ class Model(object):
         joblib.dump(self.regressor, OUTPUT_FILE)
 
     def fit(self, X, y):
-        X = MinMaxScaler().fit_transform(var_x)
-        y = var_y.ravel()
+        X = MinMaxScaler().fit_transform(X)
+        y = y.values.ravel()
         cv_r2, cv_mse = [], []
         for train, test in RepeatedKFold(n_splits=10, n_repeats=1).split(X):
             self.regressor.fit(X[train],y[train])
@@ -269,12 +317,12 @@ class Model(object):
         return self
 
     def predict(self, X_mesh, Geography, plot=False):
-        y_pred = pd.DataFrame(self.regressor.predict(MinMaxScaler().fit_transform(zmesh)),
+        y_pred = pd.DataFrame(self.regressor.predict(MinMaxScaler().fit_transform(X_mesh)),
                               index=Geography.meshgrid.index, columns=['pred'])
         y_pred['lat'] = Geography.meshgrid['lat']
         y_pred['lon'] = Geography.meshgrid['lon']
         if plot:
-            plot_interpolation(y_pred, Geography)
+            self.plot_interpolation(y_pred, Geography)
         return y_pred
 
     def plot_interpolation(self, y_pred, Geography, vmin=0, vmax=150):
@@ -292,67 +340,55 @@ class Model(object):
 
 
 class Bee(object):
-    def __init__(self, configuration__, mode='load'):
-        if mode=='make':
-            self.geography = Geography(configuration__, mode)
-            sensors = Sensors(configuration__).delimit_sensors_by_geography(geography.city)
-            sensors.delimit_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv',osm_args={
-                'Geography': geography,
-                'input_pointdf': sensors.sensors,
-                'line_objs': configuration__['osm_line_objs'],
-                'point_objs': configuration__['osm_point_objs']
-            })
-            self.features = Features(configuration__, mode, make_args={
-                'Sensors': sensors,
-                'variables': configuration__['variables_sensors']
-            }, osm_args={
-                'Geography': self.geography,
-                'input_pointdf': sensors.sensors,
-                'line_objs': configuration__['osm_line_objs'],
-                'point_objs': configuration__['osm_point_objs']
-            })
-        elif mode=='load':
-            self.geography = Geography(configuration__)
-            self.features = Features(configuration__)
-    # def predict(self, variable, plot=True):
+    def __init__(self, configuration__):
+        self.configuration__ = configuration__
+    def fit(self, mode, variables):
+        self.geography = Geography(self.configuration__, mode)
+        self.sensors = Sensors(self.configuration__, mode, delimit_geography=self.geography, delimit_quantiles=True)
+        self.features = Features(self.configuration__, mode, Sensors=self.sensors, Geography=self.geography)
+    # def predict(self, data, plot=True):
 
 
-if __name__=='__main__':
-    configuration__ = {
-        'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_30days/',
-        'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
-        'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
-        'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
-        'Sensors__frequency':'D',
-        'Geography__filter_column':'msoa11nm',
-        'Geography__filter_label':'Newcastle upon Tyne',
-        'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.5], 'latitude_range':[54.95, 55.08]},
-        'variables_sensors': ['NO2','Temperature'],#,'O3','PM2.5','NO','Pressure','Wind Direction'],
-        'osm_line_objs': ['primary','trunk','motorway','residential'],
-        'osm_point_objs': ['traffic_signals','crossing']
-    }
+# if __name__=='__main__':
+configuration__ = {
+    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_30days/',
+    'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
+    'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
+    'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
+    'Sensors__frequency':'D',
+    'Sensors__variables': ['NO2','Temperature','O3','PM2.5'],
+    'Geography__filter_column':'msoa11nm',
+    'Geography__filter_label':'Newcastle upon Tyne',
+    'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.5], 'latitude_range':[54.95, 55.08]},
+    'Features__osm_line_objs': ['primary','trunk','motorway','residential'],
+    'Features__osm_point_objs': ['traffic_signals','crossing']
+}
 
-    geography = Geography(configuration__)
+geography = Geography(configuration__)
 
-    # sensors = Sensors(configuration__).delimit_sensors_by_geography(geography.city)
-    # sensors.delimit_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv',osm_args={
-    #     'Geography': geography,
-    #     'input_pointdf': sensors.sensors,
-    #     'line_objs': configuration__['osm_line_objs'],
-    #     'point_objs': configuration__['osm_point_objs']
-    # })
+# sensors = Sensors(configuration__)
+sensors = Sensors(configuration__, mode='make', delimit_geography=geography)
 
-    features = Features(configuration__)
-    # features = Features(configuration__, mode='make', make_args={
-    #     'Sensors': sensors,
-    #     'variables': configuration__['variables_sensors']
-    # }, osm_args={
-    #     'Geography': geography,
-    #     'input_pointdf': sensors.sensors,
-    #     'line_objs': configuration__['osm_line_objs'],
-    #     'point_objs': configuration__['osm_point_objs']
-    # })
+# features = Features(configuration__)
+features = Features(configuration__, mode='make', Sensors=sensors, Geography=geography)
 
-    model_temp = Model(
-        GradientBoostingRegressor(n_estimators=200, max_depth=3, max_features=None)
-    ).fit(**features.get_train_features('Temperature'))
+
+f = features.get_train_features('NO2')
+
+f['X'].head()
+plt.show()
+
+f['X']['O3']
+
+model_no2 = Model(
+    GradientBoostingRegressor(n_estimators=200, max_depth=5, max_features=None)
+).fit(X=f['X'], y=f['y'])
+model_no2.mse
+
+features.zx.columns.unique()
+X_mesh = features.mesh_ingestion(sensors, geography, configuration__['Sensors__variables'], timestamp='2018-07-01')
+
+idx = pd.IndexSlice
+X_mesh.loc[idx[:,328],:][['NO2','O3']]
+
+model_no2.predict(X_mesh.loc['2018-07-01'], geography, plot=True)
