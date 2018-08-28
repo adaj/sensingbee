@@ -10,7 +10,7 @@ import shapely
 
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, AdaBoostRegressor
 from sklearn.model_selection import RandomizedSearchCV, RepeatedKFold, learning_curve
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, RobustScaler
 from sklearn.metrics import r2_score, mean_squared_error
 
 import sensingbee.utils
@@ -49,18 +49,17 @@ class Sensors(object):
             self.data, self.sensors = self.resample_by_frequency(configuration__['Sensors__frequency'])
             if delimit_geography is not None:
                 self.delimit_sensors_by_geography(delimit_geography.city)
-            # if delimit_quantiles:
-            #     self.delimit_sensors_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv', osm_args={
-            #         'Geography': delimit_geography,
-            #         'line_objs': configuration__['Features__osm_line_objs'],
-            #         'point_objs': configuration__['Features__osm_point_objs']
-            #     })
-            # self.delimit_data_by_threshold(t_dict = {
-            #     'O3':40,
-            #     'Temperature':25,
-            #     'NO2':100,
-            #     'PM2.5':15
-            # })
+            if delimit_quantiles:
+                self.delimit_sensors_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv', osm_args={
+                    'Geography': delimit_geography,
+                    'line_objs': configuration__['Features__osm_line_objs'],
+                    'point_objs': configuration__['Features__osm_point_objs']
+                })
+            self.delimit_data_by_threshold(t_dict = {
+                'Temperature':25,
+                'NO2':80,
+                'PM2.5':15
+            })
             self.data.to_csv(configuration__['DATA_FOLDER']+'data__.csv')
             self.sensors.to_csv(configuration__['DATA_FOLDER']+'sensors__.csv')
         if mode=='load':
@@ -284,6 +283,7 @@ class Features(object):
                 zmesh = zmesh.set_index('Timestamp',append=True).swaplevel(0,1)
                 X_mesh = X_mesh.append(zmesh)
         else:
+            timestamp = pd.to_datetime(timestamp)
             zmesh = sensingbee.utils.mesh_ingestion(Sensors, Geography.meshgrid, variables, timestamp)
             zmesh['Timestamp'] = timestamp
             zmesh = zmesh.set_index('Timestamp',append=True).swaplevel(0,1)
@@ -304,7 +304,7 @@ class Model(object):
         joblib.dump(self.regressor, OUTPUT_FILE)
 
     def fit(self, X, y):
-        X = MinMaxScaler().fit_transform(X)
+        X = RobustScaler().fit_transform(X)
         y = y.values.ravel()
         cv_r2, cv_mse = [], []
         for train, test in RepeatedKFold(n_splits=10, n_repeats=1).split(X):
@@ -317,19 +317,19 @@ class Model(object):
         return self
 
     def predict(self, X_mesh, Geography, plot=False):
-        y_pred = pd.DataFrame(self.regressor.predict(MinMaxScaler().fit_transform(X_mesh)),
+        y_pred = pd.DataFrame(self.regressor.predict(RobustScaler().fit_transform(X_mesh)),
                               index=Geography.meshgrid.index, columns=['pred'])
         y_pred['lat'] = Geography.meshgrid['lat']
         y_pred['lon'] = Geography.meshgrid['lon']
         if plot:
-            self.plot_interpolation(y_pred, Geography)
+            self.plot_interpolation(y_pred, Geography, plot['vmin'], plot['vmax'])
         return y_pred
 
-    def plot_interpolation(self, y_pred, Geography, vmin=0, vmax=150):
+    def plot_interpolation(self, y_pred, Geography, vmin=0, vmax=100):
         Z = np.zeros(Geography.meshlonv.shape[0]*Geography.meshlonv.shape[1]) - 9999
         Z[Geography.meshgrid.index.values] = y_pred['pred'].values.ravel()
         Z = Z.reshape(Geography.meshlonv.shape)
-        fig, axes = plt.subplots(ncols=1, nrows=1, figsize=(6.5,5.5))
+        fig, axes = plt.subplots(ncols=1, nrows=1, figsize=(7.5,5.5))
         Geography.city.plot(ax=axes, color='white', edgecolor='black', linewidth=2)
         cs = plt.contourf(Geography.meshlonv, Geography.meshlatv, Z,
                           levels=np.linspace(0, Z.max(), 20), cmap=plt.cm.Spectral_r, alpha=1, vmin=vmin, vmax=vmax)
@@ -337,6 +337,7 @@ class Model(object):
         plt.axis('off')
         plt.tight_layout()
         plt.show()
+    # def plot_learning_curve():
 
 
 class Bee(object):
@@ -356,7 +357,7 @@ configuration__ = {
     'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
     'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
     'Sensors__frequency':'D',
-    'Sensors__variables': ['NO2','Temperature','O3','PM2.5'],
+    'Sensors__variables': ['NO2','Temperature','PM2.5'],
     'Geography__filter_column':'msoa11nm',
     'Geography__filter_label':'Newcastle upon Tyne',
     'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.5], 'latitude_range':[54.95, 55.08]},
@@ -369,26 +370,27 @@ geography = Geography(configuration__)
 # sensors = Sensors(configuration__)
 sensors = Sensors(configuration__, mode='make', delimit_geography=geography)
 
+sensors.data.loc['PM2.5'].hist(bins=50)
+
+sensors.data.loc[]
+# sensors.data.drop(('NO2',(sensors.data.loc[['NO2'],:]>300).index.get_level_values(0))).
+
+sensors.data.loc['NO2'].drop(sensors.data.loc['NO2']>300, axis=1)
+
+
 # features = Features(configuration__)
 features = Features(configuration__, mode='make', Sensors=sensors, Geography=geography)
 
-
-f = features.get_train_features('NO2')
-
+f = features.get_train_features('PM2.5')
 f['X'].head()
-plt.show()
-
-f['X']['O3']
 
 model_no2 = Model(
-    GradientBoostingRegressor(n_estimators=200, max_depth=5, max_features=None)
+    GradientBoostingRegressor(n_estimators=200, max_depth=5, max_features=0.5)
 ).fit(X=f['X'], y=f['y'])
 model_no2.mse
 
 features.zx.columns.unique()
 X_mesh = features.mesh_ingestion(sensors, geography, configuration__['Sensors__variables'], timestamp='2018-07-01')
-
-idx = pd.IndexSlice
-X_mesh.loc[idx[:,328],:][['NO2','O3']]
-
-model_no2.predict(X_mesh.loc['2018-07-01'], geography, plot=True)
+X_mesh.head()
+y_pred = model_no2.predict(X_mesh.loc['2018-07-01'], geography, {'vmin':0, 'vmax':15})
+y_pred['pred'].hist(bins=50)
