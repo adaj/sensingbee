@@ -51,7 +51,7 @@ def mesh_ingestion(Sensors, meshgrid, variables, timestamp):
         for var in variables:
             st = Sensors.data.loc[idx[var,:,timestamp]]
             closest = Sensors.sensors.loc[st.index.get_level_values(1),'geometry'].apply(lambda x: x.distance(i['geometry'])).nsmallest(5)
-            closest = st.loc[idx[var,closest.index,timestamp],:].join(closest)
+            closest = st.loc[idx[var,closest.index,timestamp],:].join(closest, on='Sensor Name')
 
             values += list(closest['Value'].values)
             values += list(closest['geometry'].values)

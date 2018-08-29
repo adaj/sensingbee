@@ -3,14 +3,12 @@ import time
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-
 import geopandas as gpd
 import fiona
 import shapely
-
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, AdaBoostRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.model_selection import RandomizedSearchCV, RepeatedKFold, learning_curve
-from sklearn.preprocessing import MinMaxScaler, RobustScaler
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import r2_score, mean_squared_error
 
 import sensingbee.utils
@@ -34,7 +32,7 @@ class Sensors(object):
     index = []
     """
 
-    def __init__(self, configuration__, mode='load', delimit_geography=None, delimit_quantiles=True):
+    def __init__(self, configuration__, mode='load', delimit_geography=None, delimit_quantiles=False):
         if mode=='make':
             idx = pd.IndexSlice
             self.sensors = pd.read_csv(configuration__['DATA_FOLDER']+'sensors.csv',index_col='name')
@@ -50,16 +48,12 @@ class Sensors(object):
             if delimit_geography is not None:
                 self.delimit_sensors_by_geography(delimit_geography.city)
             if delimit_quantiles:
-                self.delimit_sensors_by_osm_quantile(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv', osm_args={
+                self.delimit_sensors_by_osm_quantile(osm_args={
                     'Geography': delimit_geography,
                     'line_objs': configuration__['Features__osm_line_objs'],
                     'point_objs': configuration__['Features__osm_point_objs']
                 })
-            self.delimit_data_by_threshold(t_dict = {
-                'Temperature':25,
-                'NO2':80,
-                'PM2.5':15
-            })
+            self.delimit_data_by_threshold(configuration__['Sensors__threshold_callibration'])
             self.data.to_csv(configuration__['DATA_FOLDER']+'data__.csv')
             self.sensors.to_csv(configuration__['DATA_FOLDER']+'sensors__.csv')
         if mode=='load':
@@ -76,12 +70,11 @@ class Sensors(object):
         self.data = self.data.loc[idx[:,self.sensors.index,:],:]
         return self
 
-    def delimit_sensors_by_osm_quantile(self, QUANTILES_PATH, osm_args):
+    def delimit_sensors_by_osm_quantile(self, osm_args):
         idx = pd.IndexSlice
         osm_args['input_pointdf'] = self.sensors
         osm_df = Features({},mode=None).make_osm_features(**osm_args)
-        l = len(osm_df)
-        quantiles = pd.read_csv(QUANTILES_PATH, index_col=0, header=-1, squeeze=True)
+        quantiles = osm_df.quantile(0.5)
         osm_df = osm_df.loc[osm_df.apply(lambda x: True if np.any(x>quantiles) else False, axis=1)]
         self.sensors = self.sensors.loc[osm_df.index]
         self.data = self.data.loc[idx[:,osm_df.index,:],:]
@@ -90,10 +83,7 @@ class Sensors(object):
     def delimit_data_by_threshold(self, t_dict):
         off, self.dropped_sensors, self.dropped_data = {}, {}, {}
         for var, threshold in t_dict.items():
-            if var!='Temperature':
-                D = self.data.loc[var]['Value'].loc[self.data.loc[var]['Value']>0]
-            else:
-                D = self.data.loc[var]['Value']
+            D = self.data.loc[var]['Value']
             off[var] = []
             for i,si in enumerate(D.index.get_level_values(0).unique()):
                 if D.loc[si].mean() > threshold:
@@ -128,14 +118,14 @@ class Geography(object):
         self.load_OSM_objects(configuration__['OSM_FOLDER'])
         self.make_meshgrid(**configuration__['Geography__meshgrid'])
         if mode=='make':
-            self.delimit_meshgrid_by_quantiles(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv', {
+            self.delimit_meshgrid_by_quantiles({
                 'Geography': self,
                 'input_pointdf': self.meshgrid,
                 'line_objs': configuration__['Features__osm_line_objs'],
                 'point_objs': configuration__['Features__osm_point_objs']
-            }).to_csv(configuration__['DATA_FOLDER']+'mesh_valid-regions.csv')
+            }).to_csv(configuration__['DATA_FOLDER']+'meshgrid.csv')
         elif mode=='load':
-            self.load_meshgrid_csv(configuration__['DATA_FOLDER']+'mesh_valid-regions.csv')
+            self.load_meshgrid_csv(configuration__['DATA_FOLDER']+'meshgrid.csv')
 
     def filter_by_label(self, column, label):
         return self.city[self.city[column].str.contains(label)]
@@ -162,11 +152,10 @@ class Geography(object):
         self.meshgrid = gpd.sjoin(self.meshgrid, self.city, how='inner', op='intersects')[self.meshgrid.columns]
         return self
 
-    def delimit_meshgrid_by_quantiles(self, QUANTILES_PATH, osm_args):
+    def delimit_meshgrid_by_quantiles(self, osm_args):
         idx = pd.IndexSlice
         osm_df = Features({},mode=None).make_osm_features(**osm_args)
-        l = len(osm_df)
-        quantiles = pd.read_csv(QUANTILES_PATH, index_col=0, header=-1, squeeze=True)
+        quantiles = osm_df.quantile(0.5)
         osm_df = osm_df.loc[osm_df.apply(lambda x: True if np.any(x>quantiles) else False, axis=1)]
         self.meshgrid = self.meshgrid.loc[osm_df.index].join(osm_df)
         return self.meshgrid
@@ -206,7 +195,6 @@ class Features(object):
             osm_features = self.make_osm_features(Geography, Sensors.sensors,
                                         configuration__['Features__osm_line_objs'],
                                         configuration__['Features__osm_point_objs'])
-            osm_features.quantile(0.5).to_csv(configuration__['DATA_FOLDER']+'median_quantiles_osmfeatures.csv')
             self.zx, self.zi = sensingbee.utils.ingestion2(Sensors, configuration__['Sensors__variables'], k=5, osmf=osm_features)
             self.zx.dropna(axis='columns',inplace=True)
             self.zx.to_csv(configuration__['DATA_FOLDER']+'zx_{}.csv'.format(configuration__['Sensors__frequency']))
@@ -405,9 +393,9 @@ class Bee(object):
     def plot(self, variable, timestamp, vmin=0, vmax=100, regressor=None):
         if timestamp is None or timestamp=='*':
             if multiregressors:
-                Z = self.z[regressor][variable].reset_index().astype({'pred':'int64','lat':'float64','lon':'float64'},errors='ignore').groupby('level_1').mean()
+                Z = self.z[regressor][variable].reset_index().astype({'pred':'int64','lat':'float64','lon':'float64'},errors='ignore').groupby('level_1').median()
             else:
-                Z = self.z[variable].reset_index().astype({'pred':'int64','lat':'float64','lon':'float64'},errors='ignore').groupby('level_1').mean()
+                Z = self.z[variable].reset_index().astype({'pred':'int64','lat':'float64','lon':'float64'},errors='ignore').groupby('level_1').median()
         else:
             timestamp = pd.to_datetime(timestamp)
             Z = self.z[variable].loc[timestamp]
@@ -417,21 +405,33 @@ class Bee(object):
             self.models[variable].plot_interpolation(Z, self.geography, vmin, vmax)
 
 
-if __name__=='__main__':
-    configuration__ = {
-        'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_30days/',
-        'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
-        'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
-        'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
-        'Sensors__frequency':'D',
-        'Sensors__variables': ['NO2','Temperature','PM2.5'],
-        'Geography__filter_column':'msoa11nm',
-        'Geography__filter_label':'Newcastle upon Tyne',
-        'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.5], 'latitude_range':[54.95, 55.08]},
-        'Features__osm_line_objs': ['primary','trunk','motorway','residential'],
-        'Features__osm_point_objs': ['traffic_signals','crossing']
-    }
+# if __name__=='__main__':
+configuration__ = {
+    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data/',
+    'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
+    'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
+    'Sensors__frequency':'D',
+    'Sensors__variables': ['NO2','Temperature','PM2.5'],
+    'Sensors__threshold_callibration': {'Temperature':25, 'NO2':80, 'PM2.5':15},
+    'Geography__filter_column':'msoa11nm',
+    'Geography__filter_label':'Newcastle upon Tyne',
+    'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.5], 'latitude_range':[54.95, 55.08]},
+    'Features__osm_line_objs': ['primary','trunk','motorway','residential'],
+    'Features__osm_point_objs': ['traffic_signals','crossing']
+}
 
-    bee = Bee(configuration__).fit(mode='load', variables=['NO2','Temperature','PM2.5'])
-    bee.interpolate(variables=['NO2'], timestamp='2018-07-01')
-    bee.plot(variable='NO2', timestamp='2018-07-01', vmin=0, vmax=100)
+bee = Bee(configuration__).fit(mode='load', variables=['NO2','Temperature','PM2.5'])
+bee.interpolate(variables=['NO2'], timestamp='2018-07-01')
+bee.plot(variable='NO2', timestamp='2018-07-01', vmin=0, vmax=100)
+
+# for external/other periods samples of data
+w = Sensors({
+    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_1week/',
+    'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
+    'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
+    'Sensors__frequency':'D',
+    'Sensors__variables': ['NO2','Temperature','PM2.5'],
+    'Sensors__threshold_callibration': {'Temperature':25, 'NO2':80, 'PM2.5':15},
+}, mode='make', delimit_geography=bee.geography, delimit_quantiles=False)
+bee.interpolate(variables=['NO2'],  data=w, timestamp=pd.to_datetime('2018-08-01'))
+bee.plot(variable='NO2', timestamp='2018-08-01', vmin=0, vmax=100)

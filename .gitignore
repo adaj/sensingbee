@@ -3,9 +3,7 @@ sensors_information
 *.ipynb_checkpoints
 shape
 deprecated
-data_30days
-data_7days
-data_allsensors_8days
+data*
 idw.py
 eda
 v0.py
