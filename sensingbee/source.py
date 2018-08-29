@@ -188,21 +188,12 @@ class Features(object):
 
     Examples:
         - to instantiate by making new features
-            features = Features(configuration__, mode='make', make_args={
-                'Sensors': sensors,
-                'variables': configuration__['Sensors__variables']
-            }, osm_args={
-                'Geography': geography,
-                'input_pointdf': sensors.sensors,
-                'line_objs': configuration__['Features__osm_line_objs'],
-                'point_objs': configuration__['Features__osm_point_objs']
-            })
+
         - to instantiate by loading zx and zi
             features = Features(configuration__)
         - having zx and zi, to get train features
-            no2_x, no2_y = features.get_train_features('NO2')
-            t_x, t_y = features.get_train_features('Temperature')
-            co_x, co_y = features.get_train_features('CO')
+            no2_X, no2_y = features.get_train_features('NO2')
+            t_X, t_y = features.get_train_features('Temperature')
     """
     def __init__(self, configuration__, mode='load', Sensors=None, Geography=None):
         if mode == 'load':
@@ -275,7 +266,7 @@ class Features(object):
         return {'X':var_x, 'y': var_y}
 
     def mesh_ingestion(self, Sensors, Geography, variables, timestamp=None):
-        if timestamp is None: #'take all period of Sensors.data'
+        if timestamp is None or timestamp=='*': #'take all period of Sensors.data'
             X_mesh = pd.DataFrame()
             for t in Sensors.data.index.get_level_values(2).unique():
                 zmesh = sensingbee.utils.mesh_ingestion(Sensors, Geography.meshgrid, variables, t)
@@ -304,7 +295,7 @@ class Model(object):
         joblib.dump(self.regressor, OUTPUT_FILE)
 
     def fit(self, X, y):
-        X = RobustScaler().fit_transform(X)
+        X = MinMaxScaler().fit_transform(X)
         y = y.values.ravel()
         cv_r2, cv_mse = [], []
         for train, test in RepeatedKFold(n_splits=10, n_repeats=1).split(X):
@@ -317,11 +308,13 @@ class Model(object):
         return self
 
     def predict(self, X_mesh, Geography, plot=False):
-        y_pred = pd.DataFrame(self.regressor.predict(RobustScaler().fit_transform(X_mesh)),
+        y_pred = pd.DataFrame(self.regressor.predict(MinMaxScaler().fit_transform(X_mesh)),
                               index=Geography.meshgrid.index, columns=['pred'])
         y_pred['lat'] = Geography.meshgrid['lat']
         y_pred['lon'] = Geography.meshgrid['lon']
         if plot:
+            if plot is True:
+                plot = {'vmin':0, 'vmax':100}
             self.plot_interpolation(y_pred, Geography, plot['vmin'], plot['vmax'])
         return y_pred
 
@@ -337,60 +330,104 @@ class Model(object):
         plt.axis('off')
         plt.tight_layout()
         plt.show()
-    # def plot_learning_curve():
+
+    def plot_learning_curve(self, X, y):
+        train_sizes, train_scores, test_scores = learning_curve(
+                self.regressor, MinMaxScaler().fit_transform(X), y.values.ravel(), scoring='r2', n_jobs=2,
+                cv=RepeatedKFold(n_splits=10, n_repeats=1),
+                train_sizes=np.linspace(.1, 1.0, 5))
+        train_scores_mean = np.mean(train_scores, axis=1)
+        train_scores_std = np.std(train_scores, axis=1)
+        test_scores_mean = np.mean(test_scores, axis=1)
+        test_scores_std = np.std(test_scores, axis=1)
+        plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
+                         train_scores_mean + train_scores_std, alpha=0.3)
+        plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
+                         test_scores_mean + test_scores_std, alpha=0.3, color="g")
+        plt.plot(train_sizes, train_scores_mean, 'o-', label="Training score")
+        plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Cross-validation score")
+        plt.legend(loc="best")
+        # plt.title('Learning Curves', fontsize=18)
+        plt.tight_layout()
+        plt.show()
 
 
 class Bee(object):
+    """
+    """
     def __init__(self, configuration__):
         self.configuration__ = configuration__
-    def fit(self, mode, variables):
+
+    def fit(self, mode, variables, regressor=None):
         self.geography = Geography(self.configuration__, mode)
         self.sensors = Sensors(self.configuration__, mode, delimit_geography=self.geography, delimit_quantiles=True)
         self.features = Features(self.configuration__, mode, Sensors=self.sensors, Geography=self.geography)
-    # def predict(self, data, plot=True):
+        self.models = {}
+        self.scores = {}
+        self.multiregressors = False
+        if type(regressor)==list: # tuples with label as [('rf', RandomForest(params)), ('gb', GradiendBoost(params))]
+            self.multiregressors = []
+            for ri in regressor:
+                self.multiregressors.append(ri[0])
+                self.models[ri[0]] = {}
+                self.scores[ri[0]] = {}
+                for var in variables:
+                    self.models[ri[0]][var] = Model(ri[1]).fit(**self.features.get_train_features(var))
+                    self.scores[ri[0]][var] = (self.models[ri[0]][var].r2, self.models[ri[0]][var].mse)
+        else:
+            for var in variables:
+                if regressor is None:
+                    r = GradientBoostingRegressor(n_estimators=200, max_depth=5, max_features=0.5)
+                self.models[var] = Model(r).fit(**self.features.get_train_features(var))
+                self.scores[var] = (self.models[var].r2, self.models[var].mse)
+        return self
+
+    def interpolate(self, variables, data=None, timestamp=None):
+        if data is None:
+            data = self.sensors
+        # else (TODO)
+        X_mesh = self.features.mesh_ingestion(data, self.geography, self.configuration__['Sensors__variables'], timestamp=timestamp)
+        self.z = {}
+        for var in variables:
+            y_pred = pd.DataFrame(index=X_mesh.index, columns=['pred','lat','lon'])
+            if self.multiregressors:
+                for ri in self.multiregressors:
+                    self.z[ri] = {}
+                    for t in X_mesh.index.get_level_values(0).unique():
+                            y_pred.loc[t] = self.models[ri][var].predict(X_mesh.loc[t], self.geography).values
+                    self.z[ri][var] = y_pred
+            else:
+                for t in X_mesh.index.get_level_values(0).unique():
+                    y_pred.loc[t] = self.models[var].predict(X_mesh.loc[t], self.geography).values
+                self.z[var] = y_pred
+        return self
+
+    def plot(self, variable, timestamp, vmin=0, vmax=100, regressor=None):
+        try:
+            if self.multiregressors:
+                self.models[regressor][variable].plot_interpolation(self.z[variable].loc[timestamp], self.geography, vmin, vmax)
+            else:
+                self.models[variable].plot_interpolation(self.z[variable].loc[timestamp], self.geography, vmin, vmax)
+        except:
+            print('Invalid variable/timestamp selection')
 
 
-# if __name__=='__main__':
-configuration__ = {
-    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_30days/',
-    'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
-    'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
-    'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
-    'Sensors__frequency':'D',
-    'Sensors__variables': ['NO2','Temperature','PM2.5'],
-    'Geography__filter_column':'msoa11nm',
-    'Geography__filter_label':'Newcastle upon Tyne',
-    'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.5], 'latitude_range':[54.95, 55.08]},
-    'Features__osm_line_objs': ['primary','trunk','motorway','residential'],
-    'Features__osm_point_objs': ['traffic_signals','crossing']
-}
 
-geography = Geography(configuration__)
+if __name__=='__main__':
+    configuration__ = {
+        'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_30days/',
+        'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
+        'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
+        'VALIDREGIONS_FILE': '/home/adelsondias/Repos/newcastle/air-quality/data_30days/mesh_valid-regions.csv',
+        'Sensors__frequency':'D',
+        'Sensors__variables': ['NO2','Temperature','PM2.5'],
+        'Geography__filter_column':'msoa11nm',
+        'Geography__filter_label':'Newcastle upon Tyne',
+        'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.5], 'latitude_range':[54.95, 55.08]},
+        'Features__osm_line_objs': ['primary','trunk','motorway','residential'],
+        'Features__osm_point_objs': ['traffic_signals','crossing']
+    }
 
-# sensors = Sensors(configuration__)
-sensors = Sensors(configuration__, mode='make', delimit_geography=geography)
-
-sensors.data.loc['PM2.5'].hist(bins=50)
-
-sensors.data.loc[]
-# sensors.data.drop(('NO2',(sensors.data.loc[['NO2'],:]>300).index.get_level_values(0))).
-
-sensors.data.loc['NO2'].drop(sensors.data.loc['NO2']>300, axis=1)
-
-
-# features = Features(configuration__)
-features = Features(configuration__, mode='make', Sensors=sensors, Geography=geography)
-
-f = features.get_train_features('PM2.5')
-f['X'].head()
-
-model_no2 = Model(
-    GradientBoostingRegressor(n_estimators=200, max_depth=5, max_features=0.5)
-).fit(X=f['X'], y=f['y'])
-model_no2.mse
-
-features.zx.columns.unique()
-X_mesh = features.mesh_ingestion(sensors, geography, configuration__['Sensors__variables'], timestamp='2018-07-01')
-X_mesh.head()
-y_pred = model_no2.predict(X_mesh.loc['2018-07-01'], geography, {'vmin':0, 'vmax':15})
-y_pred['pred'].hist(bins=50)
+    bee = Bee(configuration__).fit(mode='load', variables=['NO2','Temperature','PM2.5'])
+    bee.interpolate(variables=['NO2'], timestamp='2018-07-01')
+    bee.plot(variable='NO2', timestamp='2018-07-01', vmin=0, vmax=100)
