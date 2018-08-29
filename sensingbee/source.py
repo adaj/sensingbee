@@ -403,14 +403,18 @@ class Bee(object):
         return self
 
     def plot(self, variable, timestamp, vmin=0, vmax=100, regressor=None):
-        try:
-            if self.multiregressors:
-                self.models[regressor][variable].plot_interpolation(self.z[variable].loc[timestamp], self.geography, vmin, vmax)
+        if timestamp is None or timestamp=='*':
+            if multiregressors:
+                Z = self.z[regressor][variable].reset_index().astype({'pred':'int64','lat':'float64','lon':'float64'},errors='ignore').groupby('level_1').mean()
             else:
-                self.models[variable].plot_interpolation(self.z[variable].loc[timestamp], self.geography, vmin, vmax)
-        except:
-            print('Invalid variable/timestamp selection')
-
+                Z = self.z[variable].reset_index().astype({'pred':'int64','lat':'float64','lon':'float64'},errors='ignore').groupby('level_1').mean()
+        else:
+            timestamp = pd.to_datetime(timestamp)
+            Z = self.z[variable].loc[timestamp]
+        if self.multiregressors:
+            self.models[regressor][variable].plot_interpolation(Z, self.geography, vmin, vmax)
+        else:
+            self.models[variable].plot_interpolation(Z, self.geography, vmin, vmax)
 
 
 if __name__=='__main__':

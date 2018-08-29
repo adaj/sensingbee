@@ -4,5 +4,13 @@ sensors_information
 shape
 deprecated
 data_30days
+data_7days
 data_allsensors_8days
 idw.py
+eda
+v0.py
+hist_clustering.py
+cy
+__pycache__
+experiment*
+ingestion*
