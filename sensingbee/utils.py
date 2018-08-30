@@ -20,12 +20,12 @@ def ingestion2(Sensors, variables, k=5, osmf=None):
                 mdf = Sensors.sensors.loc[sdf.index.get_level_values(1).unique()] # sensors about them
                 try:
                     dij = mdf['geometry'].apply(lambda x: si['geometry'].distance(x)).sort_values()
-                    dij = dij.loc[(dij.index!=si.name) & (dij<0.11)].sample(k, random_state=0) #0.11 = 10km
+                    dij = dij.loc[(dij.index!=si.name)].nsmallest(k) #0.11 = 10km
                     dij = sdf.loc[idx[var,dij.index,t],:].join(dij)
                     zx.loc[idx[si.name,t],'d_{}'.format(var)] = dij['geometry'].values
                     zx.loc[idx[si.name,t],var] = dij['Value'].values
                 except:
-                    print('erro in ',s,t,var)
+                    print('error in ',s,t,var)
                     pass
     if Sensors.data.index.get_level_values(2).freq == 'H':
         zx['hour'] = zx.index.get_level_values(1).hour
@@ -62,3 +62,44 @@ def mesh_ingestion(Sensors, meshgrid, variables, timestamp):
     zmesh['day'] = timestamp.day
     zmesh = zmesh.join(meshgrid[meshgrid.columns[~meshgrid.columns.isin(['lat','lon','geometry'])]])
     return zmesh
+
+def pull_osm_objects(bbox, line_objs, point_objs):
+    import urllib.request
+    import json
+    import geopandas as gpd
+    import fiona
+    import shapely
+    points_query_string = ''.join(["node[\"highway\"=\"{}\"]{};".format(i,bbox) for i in point_objs])
+    osm_points = "[out:json][timeout:100];({});out+geom;".format(points_query_string)
+    osm_points = json.loads(urllib.request.urlopen('http://overpass-api.de/api/interpreter?data='+osm_points).read())
+    points = []
+    for p in osm_points['elements']:
+        elem = {}
+        try:
+            elem['geometry'] = shapely.geometry.Point([p['lon'],p['lat']])
+        except:
+            continue
+        try:
+            elem['highway'] = p['tags']['highway']
+        except:
+            elem['highway'] = ''
+        points.append(elem)
+    points = gpd.GeoDataFrame(points,crs={'init': 'epsg:4326'}).to_crs(fiona.crs.from_epsg(4326))
+    #
+    lines_query_string = ''.join(["way[\"highway\"=\"{}\"]{};".format(i,bbox) for i in line_objs])
+    osm_lines = "[out:json][timeout:100];({});>;<;out+geom;".format(lines_query_string)
+    osm_lines = json.loads(urllib.request.urlopen('http://overpass-api.de/api/interpreter?data='+osm_lines).read())
+    lines = []
+    for l in osm_lines['elements']:
+        elem = {}
+        try:
+            elem['geometry'] = shapely.geometry.LineString([[i['lon'],i['lat']] for i in l['geometry']])
+        except:
+            continue
+        try:
+            elem['highway'] = l['tags']['highway']
+        except:
+            elem['highway'] = ''
+        lines.append(elem)
+    lines = gpd.GeoDataFrame(lines,crs={'init': 'epsg:4326'}).to_crs(fiona.crs.from_epsg(4326))
+    return lines, points

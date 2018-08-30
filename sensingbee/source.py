@@ -18,28 +18,34 @@ class Sensors(object):
     """
     Stores data and metadata about sensors. The methods implemented for
     this class is only to filter data on the spatial and temporal settings.
-
-    Needs to be configured with a DATA_FOLDER, where all  information related
-    to the object will be stored. There are some restrictions about data input
-    format. First, it needs to be on csv. Also, must follow:
-
-    * 1. sensors (path = DATA_FOLDER+'sensors.csv')
-    columns = []
-    index = []
-
-    * 2. data (path = DATA_FOLDER+'data.csv')
-    columns = []
-    index = []
     """
-
-    def __init__(self, configuration__, mode='load', delimit_geography=None, delimit_quantiles=False):
-        if mode=='make':
-            idx = pd.IndexSlice
-            self.sensors = pd.read_csv(configuration__['DATA_FOLDER']+'sensors.csv',index_col='name')
+    def __init__(self, configuration__, mode, path, delimit_geography=None, delimit_quantiles=False):
+        idx = pd.IndexSlice
+        if mode=='get':
+            path['start_time'] = path['start_time'].replace('-','')
+            path['end_time'] = path['end_time'].replace('-','')
+            path['variable'] = '-and-'.join(configuration__['Sensors__variables']).lower()
+            data = pd.read_csv('{}?start_time={}000000&end_time={}005959&variable={}'.format(
+                                    path['url'], path['start_time'], path['end_time'], path['variable']))
+            data['Timestamp'] = pd.to_datetime(data['Timestamp'])
+            self.sensors = data.loc[:,['type','active','lon','lat','name']].set_index('name')
+            self.sensors = gpd.GeoDataFrame(self.sensors,
+                                    geometry=[shapely.geometry.Point(xy) for xy in zip(self.sensors['lon'], self.sensors['lat'])],
+                                    crs={'init': 'epsg:4326'}).to_crs(fiona.crs.from_epsg(4326))
+            self.data = data.loc[:,['Variable','name','Timestamp','Value']].set_index(['Variable','name','Timestamp'])
+            self.data = self.data.loc[idx[configuration__['Sensors__variables']],:]
+            self.sensors = self.sensors.loc[self.data.index.get_level_values(1).unique()]
+            self.data, self.sensors = self.resample_by_frequency(configuration__['Sensors__frequency'])
+            self.data.index.names = ['Variable','Sensor Name','Timestamp']
+            if delimit_geography is not None:
+                self.delimit_sensors_by_geography(delimit_geography.city)
+            self.delimit_data_by_threshold(configuration__['Sensors__threshold_callibration'])
+        elif mode=='make':
+            self.sensors = pd.read_csv(path+'sensors.csv',index_col='name')
             self.sensors = gpd.GeoDataFrame(self.sensors[['type','active','lon','lat']],
                                     geometry=[shapely.geometry.Point(xy) for xy in zip(self.sensors['lon'], self.sensors['lat'])],
                                     crs={'init': 'epsg:4326'}).to_crs(fiona.crs.from_epsg(4326))
-            self.data = pd.read_csv(configuration__['DATA_FOLDER']+'data.csv')
+            self.data = pd.read_csv(path+'data.csv')
             self.data['Timestamp'] = pd.to_datetime(self.data['Timestamp'])
             self.data = self.data.set_index(['Variable','Sensor Name','Timestamp'])
             self.data = self.data.loc[idx[configuration__['Sensors__variables']],:]
@@ -56,10 +62,10 @@ class Sensors(object):
             self.delimit_data_by_threshold(configuration__['Sensors__threshold_callibration'])
             self.data.to_csv(configuration__['DATA_FOLDER']+'data__.csv')
             self.sensors.to_csv(configuration__['DATA_FOLDER']+'sensors__.csv')
-        if mode=='load':
-            self.sensors = pd.read_csv(configuration__['DATA_FOLDER']+'sensors__.csv', index_col=0)
+        elif mode=='load':
+            self.sensors = pd.read_csv(path+'sensors__.csv', index_col=0)
             self.sensors = gpd.GeoDataFrame(self.sensors, geometry=[shapely.geometry.Point(xy) for xy in zip(self.sensors['lon'], self.sensors['lat'])])
-            self.data = pd.read_csv(configuration__['DATA_FOLDER']+'data__.csv')
+            self.data = pd.read_csv(path+'data__.csv')
             self.data['Timestamp'] = pd.to_datetime(self.data['Timestamp'])
             self.data = self.data.set_index(['Variable','Sensor Name','Timestamp'])
 
@@ -115,7 +121,9 @@ class Geography(object):
         self.city = self.city.to_crs(fiona.crs.from_epsg(4326))
         self.city.crs = {'init': 'epsg:4326', 'no_defs': True}
         self.city = gpd.GeoDataFrame(geometry=gpd.GeoSeries(shapely.ops.cascaded_union(self.city['geometry'])))
-        self.load_OSM_objects(configuration__['OSM_FOLDER'])
+        self.lines, self.points = sensingbee.utils.pull_osm_objects(configuration__['Features__osm_bbox'],
+                            configuration__['Features__osm_line_objs'], configuration__['Features__osm_point_objs'])
+        self.delimit_osm_by_city()
         self.make_meshgrid(**configuration__['Geography__meshgrid'])
         if mode=='make':
             self.delimit_meshgrid_by_quantiles({
@@ -130,11 +138,9 @@ class Geography(object):
     def filter_by_label(self, column, label):
         return self.city[self.city[column].str.contains(label)]
 
-    def load_OSM_objects(self, OSM_FOLDER):
-        self.lines = gpd.read_file(OSM_FOLDER+'newcastle_streets.shp')
+    def delimit_osm_by_city(self):
         self.lines.crs = self.city.crs
         self.lines = gpd.sjoin(self.lines, self.city, how='inner', op='intersects')[self.lines.columns]
-        self.points = gpd.read_file(OSM_FOLDER+'newcastle_points.shp')
         self.points.crs = self.city.crs
         self.points = gpd.sjoin(self.points, self.city, how='inner', op='intersects')[self.points.columns]
         return self
@@ -346,10 +352,20 @@ class Bee(object):
     def __init__(self, configuration__):
         self.configuration__ = configuration__
 
-    def fit(self, mode, variables, regressor=None):
+    def fit(self, mode, variables, regressor=None, verbose=False):
+        t0 = time.time()
         self.geography = Geography(self.configuration__, mode)
-        self.sensors = Sensors(self.configuration__, mode, delimit_geography=self.geography, delimit_quantiles=True)
+        if verbose:
+            print('[Geography] {} seconds'.format(time.time()-t0))
+            t0 = time.time()
+        self.sensors = Sensors(self.configuration__, mode, self.configuration__['DATA_FOLDER'], delimit_geography=self.geography, delimit_quantiles=True)
+        if verbose:
+            print('[Sensors] {} seconds'.format(time.time()-t0))
+            t0 = time.time()
         self.features = Features(self.configuration__, mode, Sensors=self.sensors, Geography=self.geography)
+        if verbose:
+            print('[Features] {} seconds'.format(time.time()-t0))
+            t0 = time.time()
         self.models = {}
         self.scores = {}
         self.multiregressors = False
@@ -373,7 +389,8 @@ class Bee(object):
     def interpolate(self, variables, data=None, timestamp=None):
         if data is None:
             data = self.sensors
-        # else (TODO)
+        if timestamp is not None or timestamp!='*':
+            timestamp = pd.to_datetime(timestamp)
         X_mesh = self.features.mesh_ingestion(data, self.geography, self.configuration__['Sensors__variables'], timestamp=timestamp)
         self.z = {}
         for var in variables:
@@ -386,6 +403,7 @@ class Bee(object):
                     self.z[ri][var] = y_pred
             else:
                 for t in X_mesh.index.get_level_values(0).unique():
+                    print('bee.interpolate - ',t)
                     y_pred.loc[t] = self.models[var].predict(X_mesh.loc[t], self.geography).values
                 self.z[var] = y_pred
         return self
@@ -407,31 +425,29 @@ class Bee(object):
 
 # if __name__=='__main__':
 configuration__ = {
-    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data/',
+    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_3m/',
     'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
-    'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
     'Sensors__frequency':'D',
     'Sensors__variables': ['NO2','Temperature','PM2.5'],
     'Sensors__threshold_callibration': {'Temperature':25, 'NO2':80, 'PM2.5':15},
     'Geography__filter_column':'msoa11nm',
     'Geography__filter_label':'Newcastle upon Tyne',
-    'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.5], 'latitude_range':[54.95, 55.08]},
+    'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.51], 'latitude_range':[54.96, 55.05]},
+    'Features__osm_bbox': '(54.96,-1.8,55.05,-1.51)',
     'Features__osm_line_objs': ['primary','trunk','motorway','residential'],
     'Features__osm_point_objs': ['traffic_signals','crossing']
 }
 
-bee = Bee(configuration__).fit(mode='load', variables=['NO2','Temperature','PM2.5'])
-bee.interpolate(variables=['NO2'], timestamp='2018-07-01')
-bee.plot(variable='NO2', timestamp='2018-07-01', vmin=0, vmax=100)
-
-# for external/other periods samples of data
-w = Sensors({
-    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_1week/',
-    'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
-    'OSM_FOLDER':'/home/adelsondias/Downloads/newcastle_streets/',
-    'Sensors__frequency':'D',
-    'Sensors__variables': ['NO2','Temperature','PM2.5'],
-    'Sensors__threshold_callibration': {'Temperature':25, 'NO2':80, 'PM2.5':15},
-}, mode='make', delimit_geography=bee.geography, delimit_quantiles=False)
-bee.interpolate(variables=['NO2'],  data=w, timestamp=pd.to_datetime('2018-08-01'))
+bee = Bee(configuration__).fit(mode='make', variables=['NO2','Temperature','PM2.5'], verbose=True)
+bee.interpolate(variables=['NO2'], timestamp='2018-08-01').
 bee.plot(variable='NO2', timestamp='2018-08-01', vmin=0, vmax=100)
+
+# to interpolate external/other periods samples of data, by using UO api
+w = Sensors(configuration__, mode='get', path={
+                'start_time': '2018-01-17',
+                'end_time': '2018-01-17',
+                'url': 'https://api.newcastle.urbanobservatory.ac.uk/api/v1/sensors/data/raw.csv'
+            }, delimit_geography=bee.geography, delimit_quantiles=False)
+bee.interpolate(variables=['NO2'],
+                data=w,
+                timestamp=pd.to_datetime('2018-01-17')).plot(variable='NO2', timestamp='2018-01-17', vmin=0, vmax=100)
