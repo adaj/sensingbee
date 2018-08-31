@@ -16,8 +16,16 @@ import sensingbee.utils
 
 class Sensors(object):
     """
-    Stores data and metadata about sensors. The methods implemented for
-    this class is only to filter data on the spatial and temporal settings.
+    Stores data and metadata about sensors. There are required a `configuration__` dictionary,
+    containing at least information about a (1) data folder path to store metadata, (2) list
+    of variables' names that will be considered, (3) the frequency that those variables should
+    be aggregated ('D' for daily, 'W' for weekly etc) and (4) a threshold for not considering
+    uncallibrated sensors (it will cut sensors with samples mean upper than the threshold).
+    Besides the configuration, the instantiation parameter `mode` is required. It has the options
+    of "make" a new object based on two csv files (data.csv and sensors.csv, containing the
+    sensors samples and metainformation respectively), "load" for loading pre-maked data, but
+    also "get", that can pull data from API, such as Urban Observatory open sensors API, that
+    should use information on parameter `path` to make the request.
     """
     def __init__(self, configuration__, mode, path, delimit_geography=None, delimit_quantiles=False):
         idx = pd.IndexSlice
@@ -56,8 +64,8 @@ class Sensors(object):
             if delimit_quantiles:
                 self.delimit_sensors_by_osm_quantile(osm_args={
                     'Geography': delimit_geography,
-                    'line_objs': configuration__['Features__osm_line_objs'],
-                    'point_objs': configuration__['Features__osm_point_objs']
+                    'line_objs': configuration__['osm_line_objs'],
+                    'point_objs': configuration__['osm_point_objs']
                 })
             self.delimit_data_by_threshold(configuration__['Sensors__threshold_callibration'])
             self.data.to_csv(configuration__['DATA_FOLDER']+'data__.csv')
@@ -69,6 +77,7 @@ class Sensors(object):
             self.data['Timestamp'] = pd.to_datetime(self.data['Timestamp'])
             self.data = self.data.set_index(['Variable','Sensor Name','Timestamp'])
 
+    # Used for drop sensors outside a Geography object.
     def delimit_sensors_by_geography(self, geography_city):
         idx = pd.IndexSlice
         self.sensors.crs = geography_city.crs
@@ -76,6 +85,9 @@ class Sensors(object):
         self.data = self.data.loc[idx[:,self.sensors.index,:],:]
         return self
 
+    # Used for drop sensors outside the reasonable area delimited by OpenStreetMaps features.
+    # This is made to avoid bias on predicting/interpolating for zones which the urban configuration
+    # is not properly similar to where data is collected.
     def delimit_sensors_by_osm_quantile(self, osm_args):
         idx = pd.IndexSlice
         osm_args['input_pointdf'] = self.sensors
@@ -86,6 +98,9 @@ class Sensors(object):
         self.data = self.data.loc[idx[:,osm_df.index,:],:]
         return self
 
+    # Used for drop sensors considered uncallibrated due to their samples average
+    # is beyond an reasonable threshold. A t_dict parameter should have as keys
+    # the variables' names and as values the corresponding thresold.
     def delimit_data_by_threshold(self, t_dict):
         off, self.dropped_sensors, self.dropped_data = {}, {}, {}
         for var, threshold in t_dict.items():
@@ -99,6 +114,8 @@ class Sensors(object):
             self.data = self.data.drop(off[var])
         return self
 
+    # Used for resampling the data by a frequency parameter, i.e. 'D' for daily,
+    # 'W' for weekly etc.
     def resample_by_frequency(self, frequency):
         idx = pd.IndexSlice
         level_values = self.data.index.get_level_values
@@ -111,33 +128,46 @@ class Sensors(object):
 
 class Geography(object):
     """
-    Stores geospatial elements, such as city, osm_lines and osm_points. The
-    methods implemented are to ...
-
+    Stores geospatial objects, such as city geometry (loading from a shapefile) and OpenStreetMaps
+    highway objects, such as roads, crossings and traffic_signals (pulling from Overpass API). For
+    proper use, it's required to pass a `configuration__` dictionary with (1) the city's shapefile local path,
+    (and optionally a filter label to delimit the shapefile subobjects considered, e.g. if you are using a
+    shapefile from a whole country but only want to work with a single city within it), the (2) OSM features
+    parameters such as the bounding box, highway-line (primary, trunk ...) and highway-point (traffic_signals, ...)
+    type names. Also, this class implements the creation of the meshgrid that the interpolation will be applied,
+    and this meshgrid should be configured in `configuration__` dictionary with the (3) meshgrid's dimensions,
+    and latitude/longitude ranges for rectangular boundaries, so that a file will be created with the meshgrid
+    geometries in a (4) data folder. All those enumerate itens are required in `configuration__`. If it's the
+    first time that Geography is instantiated, you have to call it with `mode`="make".
     """
     def __init__(self, configuration__, mode='load'):
         self.city = gpd.read_file(configuration__['SHAPE_PATH']+'')
-        self.city = self.filter_by_label(configuration__['Geography__filter_column'],configuration__['Geography__filter_label'])
+        try:
+            self.city = self.filter_by_label(configuration__['Geography__filter_column'],configuration__['Geography__filter_label'])
         self.city = self.city.to_crs(fiona.crs.from_epsg(4326))
         self.city.crs = {'init': 'epsg:4326', 'no_defs': True}
         self.city = gpd.GeoDataFrame(geometry=gpd.GeoSeries(shapely.ops.cascaded_union(self.city['geometry'])))
-        self.lines, self.points = sensingbee.utils.pull_osm_objects(configuration__['Features__osm_bbox'],
-                            configuration__['Features__osm_line_objs'], configuration__['Features__osm_point_objs'])
+        self.lines, self.points = sensingbee.utils.pull_osm_objects(configuration__['osm_bbox'],
+                            configuration__['osm_line_objs'], configuration__['osm_point_objs'])
         self.delimit_osm_by_city()
         self.make_meshgrid(**configuration__['Geography__meshgrid'])
         if mode=='make':
             self.delimit_meshgrid_by_quantiles({
                 'Geography': self,
                 'input_pointdf': self.meshgrid,
-                'line_objs': configuration__['Features__osm_line_objs'],
-                'point_objs': configuration__['Features__osm_point_objs']
+                'line_objs': configuration__['osm_line_objs'],
+                'point_objs': configuration__['osm_point_objs']
             }).to_csv(configuration__['DATA_FOLDER']+'meshgrid.csv')
         elif mode=='load':
             self.load_meshgrid_csv(configuration__['DATA_FOLDER']+'meshgrid.csv')
 
+    # Used for filtering shapefile with a column and a label. Example: your shapefile is for
+    # the whole UK, but you just want the geometries that have "name"=="London".
     def filter_by_label(self, column, label):
         return self.city[self.city[column].str.contains(label)]
 
+    # Used for delimit the OpenStreetMaps geometries that are inside Geography.city,
+    # corresponding to the shapefile object.
     def delimit_osm_by_city(self):
         self.lines.crs = self.city.crs
         self.lines = gpd.sjoin(self.lines, self.city, how='inner', op='intersects')[self.lines.columns]
@@ -145,6 +175,8 @@ class Geography(object):
         self.points = gpd.sjoin(self.points, self.city, how='inner', op='intersects')[self.points.columns]
         return self
 
+    # Used to produce the geospatial dataframe for the meshgrid collection of dimension[0]*dimension[1]
+    # points, given the boundaries imposed by longitude_range and latitude_range.
     def make_meshgrid(self, dimensions, longitude_range, latitude_range, delimit=False):
         self.meshdimensions = dimensions
         self.longitude_range = longitude_range
@@ -158,6 +190,9 @@ class Geography(object):
         self.meshgrid = gpd.sjoin(self.meshgrid, self.city, how='inner', op='intersects')[self.meshgrid.columns]
         return self
 
+    # Used to filter the points in the meshgrid that are proper to have predictions/interpolation
+    # in order to avoid regions with the urban configuration critically different from where
+    # data is collected.
     def delimit_meshgrid_by_quantiles(self, osm_args):
         idx = pd.IndexSlice
         osm_df = Features({},mode=None).make_osm_features(**osm_args)
@@ -166,6 +201,8 @@ class Geography(object):
         self.meshgrid = self.meshgrid.loc[osm_df.index].join(osm_df)
         return self.meshgrid
 
+    # Used for loading meshgrid from the already-made meshgrid object. This is only used
+    # after a round of Geography(mode="make"), by Geography(mode="load") calls.
     def load_meshgrid_csv(self, MESHGRID_PATH):
         self.meshgrid = pd.read_csv(MESHGRID_PATH, index_col=0)
         self.meshgrid['geometry'] = [shapely.geometry.Point(xy) for xy in zip(self.meshgrid['lon'], self.meshgrid['lat'])]
@@ -175,45 +212,53 @@ class Geography(object):
 
 class Features(object):
     """
-    You can load or make meta-features matrixes (zx, zi) to after
-    get your features for an specific variable with get_train_features(variable).
-    Pay attention that if your meta-features matrixes aren't ready in
-    DATA_FOLDER you will need to make it, and it can be very slow, taking even
-    days of runnning in case of 1GB+ data_allsensors_8days.
+    Stores features for spatial interpolation of Sensors within a Geography. A Feature object
+    contains training data `zx` (features matrix) and `zi` (target values) that are the
+    information used for the regression made by the Model object. Basically, `zx` extract
+    for each variable, k (default=5) neighbors samples and the distance between them. For
+    instance, consider to extract features for NO2 and Temperature, you will have the following
+    channels/columns:
+    [NO2, NO2, NO2, NO2, NO2, d_NO2, d_NO2, d_NO2, d_NO2, d_NO2, Temperature, Temperature, Temperature
+    Temperature, Temperature, d_Temperature, d_Temperature, d_Temperature, d_Temperature, d_Temperature],
+    and their respective rows. In training sample, these rows are points where one sensor have data
+    to be predicted. So, the training process is to use these features described to predict the
+    value collected in the sensor for a particular variable (supervised learning). This process of
+    pulling features from the Sensors object is made by the `ingestion` method*. Besides, when it comes
+    to the prediction, it will be necessary to ingest features for the meshgrid, and the Feature object
+    also returns a feature matrix for the meshgrid.
+
+    *The ingestion method when making new features are a very slow method, so for reuse already
+    made features, you can use the `mode`="load".
 
     Examples:
         - to instantiate by making new features
-
-        - to instantiate by loading zx and zi
-            features = Features(configuration__)
-        - having zx and zi, to get train features
+            features = Features(configuration__, mode='make', Sensors, Geography)
+        - to instantiate by loading pre-made zx and zi
+            features = Features(configuration__, mode='load')
+        - having zx and zi, to get train features for a particular variable*
             no2_X, no2_y = features.get_train_features('NO2')
             t_X, t_y = features.get_train_features('Temperature')
+        *these X and y are the matrixes used by Model
     """
     def __init__(self, configuration__, mode='load', Sensors=None, Geography=None):
         if mode == 'load':
-            self.zx, self.zi = self.load_csv__old(configuration__['DATA_FOLDER'], configuration__['Sensors__frequency'])
+            self.zx, self.zi = self.load_csv(configuration__['DATA_FOLDER'], configuration__['Sensors__frequency'])
             self.zx.rename({'PM2':'PM2.5','d_PM2':'d_PM2.5','PM1':'PM1.0','d_PM1':'d_PM1.0'},axis='columns',inplace=True)
-            self.zx.dropna(axis='columns',inplace=True)
+            self.zx.dropna(axis=0,inplace=True)
             self.zi = self.zi.set_index('Variable',append=True).swaplevel(1,2).swaplevel(0,1)
         elif mode == 'make':
             t0 = time.time()
             osm_features = self.make_osm_features(Geography, Sensors.sensors,
-                                        configuration__['Features__osm_line_objs'],
-                                        configuration__['Features__osm_point_objs'])
+                                        configuration__['osm_line_objs'],
+                                        configuration__['osm_point_objs'])
             self.zx, self.zi = sensingbee.utils.ingestion2(Sensors, configuration__['Sensors__variables'], k=5, osmf=osm_features)
-            self.zx.dropna(axis='columns',inplace=True)
+            self.zx.dropna(axis=0,inplace=True)
             self.zx.to_csv(configuration__['DATA_FOLDER']+'zx_{}.csv'.format(configuration__['Sensors__frequency']))
             self.zi.to_csv(configuration__['DATA_FOLDER']+'zi_{}.csv'.format(configuration__['Sensors__frequency']))
             print('Features ingested and saved in {} seconds',time.time()-t0)
 
-    # should be updated when ingestion2 finished
-    def load_csv__old(self, DATA_FOLDER, frequency):
-        """
-        This can only be done if ingestion have been executed a first time
-        and zx.csv and zi.csv are available in DATA_FOLDER.
-        """
-        # self.zx = pd.read_csv(DATA_FOLDER+'zx.csv')
+    # Used for load already-made feature matrixes zx and zi
+    def load_csv(self, DATA_FOLDER, frequency):
         self.zx = pd.read_csv(DATA_FOLDER+'zx_{}.csv'.format(frequency))
         if 'Sensor Name' not in self.zx.columns:
             self.zx.rename({'Unnamed: 0':'Sensor Name'}, axis='columns', inplace=True)
@@ -226,6 +271,8 @@ class Features(object):
         self.zi.set_index(['Sensor Name','Timestamp'], inplace=True)
         return self.zx, self.zi
 
+    # Used to resample feature matrix if wanted to train models in another frequency
+    # different from the Sensors' frequency.
     def resample_by_frequency(self, frequency):
         """
         You can resample the frequency of zx and zi matrixes, but
@@ -242,6 +289,8 @@ class Features(object):
                            +[pd.Grouper(freq=frequency, level=-1)]).median())
         return self
 
+    # Used in other classes to produce the urban feature matrixes using
+    # the OpenStreetMaps objects in Geography.
     def make_osm_features(self, Geography, input_pointdf, line_objs, point_objs):
         osmf = pd.DataFrame(columns=line_objs+point_objs)
         for m in range(input_pointdf.shape[0]):
@@ -254,11 +303,14 @@ class Features(object):
             osmf.loc[i.name] = d
         return osmf
 
+    # Used for pull features for a particular variable from the zx and zi
     def get_train_features(self, variable):
         var_y = self.zi.loc[variable]
         var_x = self.zx.loc[var_y.index]
         return {'X':var_x, 'y': var_y}
 
+    # Used for get feature matrixes to feed a trained model in order
+    # to predict/interpolate for the meshgrid
     def mesh_ingestion(self, Sensors, Geography, variables, timestamp=None):
         if timestamp is None or timestamp=='*': #'take all period of Sensors.data'
             X_mesh = pd.DataFrame()
@@ -389,7 +441,7 @@ class Bee(object):
     def interpolate(self, variables, data=None, timestamp=None):
         if data is None:
             data = self.sensors
-        if timestamp is not None or timestamp!='*':
+        if timestamp is not None and timestamp!='*':
             timestamp = pd.to_datetime(timestamp)
         X_mesh = self.features.mesh_ingestion(data, self.geography, self.configuration__['Sensors__variables'], timestamp=timestamp)
         self.z = {}
@@ -433,14 +485,14 @@ configuration__ = {
     'Geography__filter_column':'msoa11nm',
     'Geography__filter_label':'Newcastle upon Tyne',
     'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.51], 'latitude_range':[54.96, 55.05]},
-    'Features__osm_bbox': '(54.96,-1.8,55.05,-1.51)',
-    'Features__osm_line_objs': ['primary','trunk','motorway','residential'],
-    'Features__osm_point_objs': ['traffic_signals','crossing']
+    'osm_bbox': '(54.96,-1.8,55.05,-1.51)',
+    'osm_line_objs': ['primary','trunk','motorway','residential'],
+    'osm_point_objs': ['traffic_signals','crossing']
 }
 
-bee = Bee(configuration__).fit(mode='make', variables=['NO2','Temperature','PM2.5'], verbose=True)
-bee.interpolate(variables=['NO2'], timestamp='2018-08-01').
-bee.plot(variable='NO2', timestamp='2018-08-01', vmin=0, vmax=100)
+bee = Bee(configuration__).fit(mode='load', variables=['NO2','Temperature','PM2.5'], verbose=True)
+bee.interpolate(variables=['NO2'], timestamp=None)
+bee.plot(variable='NO2', timestamp='*', vmin=0, vmax=150)
 
 # to interpolate external/other periods samples of data, by using UO api
 w = Sensors(configuration__, mode='get', path={
