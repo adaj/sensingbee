@@ -144,6 +144,8 @@ class Geography(object):
         self.city = gpd.read_file(configuration__['SHAPE_PATH']+'')
         try:
             self.city = self.filter_by_label(configuration__['Geography__filter_column'],configuration__['Geography__filter_label'])
+        except:
+            pass
         self.city = self.city.to_crs(fiona.crs.from_epsg(4326))
         self.city.crs = {'init': 'epsg:4326', 'no_defs': True}
         self.city = gpd.GeoDataFrame(geometry=gpd.GeoSeries(shapely.ops.cascaded_union(self.city['geometry'])))
@@ -377,7 +379,7 @@ class Model(object):
         plt.tight_layout()
         plt.show()
 
-    def plot_learning_curve(self, X, y):
+    def plot_learning_curve(self, X, y, title='', plot_path=False):
         train_sizes, train_scores, test_scores = learning_curve(
                 self.regressor, MinMaxScaler().fit_transform(X), y.values.ravel(), scoring='r2', n_jobs=2,
                 cv=RepeatedKFold(n_splits=10, n_repeats=1),
@@ -387,14 +389,16 @@ class Model(object):
         test_scores_mean = np.mean(test_scores, axis=1)
         test_scores_std = np.std(test_scores, axis=1)
         plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
-                         train_scores_mean + train_scores_std, alpha=0.3)
+                         train_scores_mean + train_scores_std, alpha=0.3, color='r')
         plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
                          test_scores_mean + test_scores_std, alpha=0.3, color="g")
-        plt.plot(train_sizes, train_scores_mean, 'o-', label="Training score")
-        plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="Cross-validation score")
+        plt.plot(train_sizes, train_scores_mean, 'o-', color='r', label="Training")
+        plt.plot(train_sizes, test_scores_mean, 'o-', color="g", label="CV")
         plt.legend(loc="best")
-        # plt.title('Learning Curves', fontsize=18)
+        plt.title(title, fontsize=18)
         plt.tight_layout()
+        if plot_path:
+            plt.savefig(plot_path+title+'.png')
         plt.show()
 
 
@@ -404,7 +408,7 @@ class Bee(object):
     def __init__(self, configuration__):
         self.configuration__ = configuration__
 
-    def fit(self, mode, variables, regressor=None, verbose=False):
+    def fit(self, mode, verbose=False):
         t0 = time.time()
         self.geography = Geography(self.configuration__, mode)
         if verbose:
@@ -418,6 +422,9 @@ class Bee(object):
         if verbose:
             print('[Features] {} seconds'.format(time.time()-t0))
             t0 = time.time()
+        return self
+
+    def train(self, variables, regressor=None, X=None, y=None):
         self.models = {}
         self.scores = {}
         self.multiregressors = False
@@ -428,13 +435,21 @@ class Bee(object):
                 self.models[ri[0]] = {}
                 self.scores[ri[0]] = {}
                 for var in variables:
-                    self.models[ri[0]][var] = Model(ri[1]).fit(**self.features.get_train_features(var))
+                    if X is None and y is None:
+                        self.models[ri[0]][var] = Model(ri[1]).fit(**self.features.get_train_features(var))
+                    else:
+                        self.models[ri[0]][var] = Model(ri[1]).fit(X, y)
                     self.scores[ri[0]][var] = (self.models[ri[0]][var].r2, self.models[ri[0]][var].mse)
         else:
             for var in variables:
                 if regressor is None:
                     r = GradientBoostingRegressor(n_estimators=200, max_depth=5, max_features=0.5)
-                self.models[var] = Model(r).fit(**self.features.get_train_features(var))
+                else:
+                    r = regressor
+                if X is None and y is None:
+                    self.models[var] = Model(r).fit(**self.features.get_train_features(var))
+                else:
+                    self.models[var] = Model(r).fit(X, y)
                 self.scores[var] = (self.models[var].r2, self.models[var].mse)
         return self
 
@@ -476,30 +491,32 @@ class Bee(object):
 
 
 # if __name__=='__main__':
-configuration__ = {
-    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_3m/',
-    'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
-    'Sensors__frequency':'D',
-    'Sensors__variables': ['NO2','Temperature','PM2.5'],
-    'Sensors__threshold_callibration': {'Temperature':25, 'NO2':80, 'PM2.5':15},
-    'Geography__filter_column':'msoa11nm',
-    'Geography__filter_label':'Newcastle upon Tyne',
-    'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.51], 'latitude_range':[54.96, 55.05]},
-    'osm_bbox': '(54.96,-1.8,55.05,-1.51)',
-    'osm_line_objs': ['primary','trunk','motorway','residential'],
-    'osm_point_objs': ['traffic_signals','crossing']
-}
+# configuration__ = {
+#     'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_3m/',
+#     'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
+#     'Sensors__frequency':'D',
+#     'Sensors__variables': ['NO2','Temperature','PM2.5'],
+#     'Sensors__threshold_callibration': {'Temperature':25, 'NO2':80, 'PM2.5':15},
+#     'Geography__filter_column':'msoa11nm',
+#     'Geography__filter_label':'Newcastle upon Tyne',
+#     'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.51], 'latitude_range':[54.96, 55.05]},
+#     'osm_bbox': '(54.96,-1.8,55.05,-1.51)',
+#     'osm_line_objs': ['primary','trunk','motorway','residential'],
+#     'osm_point_objs': ['traffic_signals','crossing']
+# }
 
-bee = Bee(configuration__).fit(mode='load', variables=['NO2','Temperature','PM2.5'], verbose=True)
-bee.interpolate(variables=['NO2'], timestamp=None)
-bee.plot(variable='NO2', timestamp='*', vmin=0, vmax=150)
 
-# to interpolate external/other periods samples of data, by using UO api
-w = Sensors(configuration__, mode='get', path={
-                'start_time': '2018-01-17',
-                'end_time': '2018-01-17',
-                'url': 'https://api.newcastle.urbanobservatory.ac.uk/api/v1/sensors/data/raw.csv'
-            }, delimit_geography=bee.geography, delimit_quantiles=False)
-bee.interpolate(variables=['NO2'],
-                data=w,
-                timestamp=pd.to_datetime('2018-01-17')).plot(variable='NO2', timestamp='2018-01-17', vmin=0, vmax=100)
+# bee = Bee(configuration__).fit(mode='load', verbose=True)
+# bee.interpolate(variables=['NO2'], timestamp=None)
+# bee.plot(variable='NO2', timestamp='*', vmin=0, vmax=150)
+
+
+# # to interpolate external/other periods samples of data, by using UO api
+# w = Sensors(configuration__, mode='get', path={
+#                 'start_time': '2018-01-17',
+#                 'end_time': '2018-01-17',
+#                 'url': 'https://api.newcastle.urbanobservatory.ac.uk/api/v1/sensors/data/raw.csv'
+#             }, delimit_geography=bee.geography, delimit_quantiles=False)
+# bee.interpolate(variables=['NO2'],
+#                 data=w,
+#                 timestamp=pd.to_datetime('2018-01-17')).plot(variable='NO2', timestamp='2018-01-17', vmin=0, vmax=100)
