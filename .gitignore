@@ -1,14 +1,4 @@
-*.csv
-sensors_information
-*.ipynb_checkpoints
-shape
-deprecated
-data*
-idw.py
-eda
-v0.py
-hist_clustering.py
-cy
+sensingbee.egg-info
+build
+dist
 __pycache__
-experiment*
-ingestion*

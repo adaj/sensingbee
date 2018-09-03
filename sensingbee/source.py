@@ -1,5 +1,8 @@
+"""
+sensingbee
+Author: Adelson Araujo Jr (adelsondias@gmail.com)
+"""
 import time
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -11,7 +14,7 @@ from sklearn.model_selection import RandomizedSearchCV, RepeatedKFold, learning_
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import r2_score, mean_squared_error
 
-import sensingbee.utils
+import sensingbee.utils as utils
 
 
 class Sensors(object):
@@ -149,7 +152,7 @@ class Geography(object):
         self.city = self.city.to_crs(fiona.crs.from_epsg(4326))
         self.city.crs = {'init': 'epsg:4326', 'no_defs': True}
         self.city = gpd.GeoDataFrame(geometry=gpd.GeoSeries(shapely.ops.cascaded_union(self.city['geometry'])))
-        self.lines, self.points = sensingbee.utils.pull_osm_objects(configuration__['osm_bbox'],
+        self.lines, self.points = utils.pull_osm_objects(configuration__['osm_bbox'],
                             configuration__['osm_line_objs'], configuration__['osm_point_objs'])
         self.delimit_osm_by_city()
         self.make_meshgrid(**configuration__['Geography__meshgrid'])
@@ -253,7 +256,7 @@ class Features(object):
             osm_features = self.make_osm_features(Geography, Sensors.sensors,
                                         configuration__['osm_line_objs'],
                                         configuration__['osm_point_objs'])
-            self.zx, self.zi = sensingbee.utils.ingestion2(Sensors, configuration__['Sensors__variables'], k=5, osmf=osm_features)
+            self.zx, self.zi = utils.ingestion2(Sensors, configuration__['Sensors__variables'], k=5, osmf=osm_features)
             self.zx.dropna(axis=0,inplace=True)
             self.zx.to_csv(configuration__['DATA_FOLDER']+'zx_{}.csv'.format(configuration__['Sensors__frequency']))
             self.zi.to_csv(configuration__['DATA_FOLDER']+'zi_{}.csv'.format(configuration__['Sensors__frequency']))
@@ -317,13 +320,13 @@ class Features(object):
         if timestamp is None or timestamp=='*': #'take all period of Sensors.data'
             X_mesh = pd.DataFrame()
             for t in Sensors.data.index.get_level_values(2).unique():
-                zmesh = sensingbee.utils.mesh_ingestion(Sensors, Geography.meshgrid, variables, t)
+                zmesh = utils.mesh_ingestion(Sensors, Geography.meshgrid, variables, t)
                 zmesh['Timestamp'] = t
                 zmesh = zmesh.set_index('Timestamp',append=True).swaplevel(0,1)
                 X_mesh = X_mesh.append(zmesh)
         else:
             timestamp = pd.to_datetime(timestamp)
-            zmesh = sensingbee.utils.mesh_ingestion(Sensors, Geography.meshgrid, variables, timestamp)
+            zmesh = utils.mesh_ingestion(Sensors, Geography.meshgrid, variables, timestamp)
             zmesh['Timestamp'] = timestamp
             zmesh = zmesh.set_index('Timestamp',append=True).swaplevel(0,1)
             X_mesh = zmesh
@@ -488,35 +491,3 @@ class Bee(object):
             self.models[regressor][variable].plot_interpolation(Z, self.geography, vmin, vmax)
         else:
             self.models[variable].plot_interpolation(Z, self.geography, vmin, vmax)
-
-
-# if __name__=='__main__':
-# configuration__ = {
-#     'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_3m/',
-#     'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
-#     'Sensors__frequency':'D',
-#     'Sensors__variables': ['NO2','Temperature','PM2.5'],
-#     'Sensors__threshold_callibration': {'Temperature':25, 'NO2':80, 'PM2.5':15},
-#     'Geography__filter_column':'msoa11nm',
-#     'Geography__filter_label':'Newcastle upon Tyne',
-#     'Geography__meshgrid':{'dimensions':[50,50], 'longitude_range':[-1.8, -1.51], 'latitude_range':[54.96, 55.05]},
-#     'osm_bbox': '(54.96,-1.8,55.05,-1.51)',
-#     'osm_line_objs': ['primary','trunk','motorway','residential'],
-#     'osm_point_objs': ['traffic_signals','crossing']
-# }
-
-
-# bee = Bee(configuration__).fit(mode='load', verbose=True)
-# bee.interpolate(variables=['NO2'], timestamp=None)
-# bee.plot(variable='NO2', timestamp='*', vmin=0, vmax=150)
-
-
-# # to interpolate external/other periods samples of data, by using UO api
-# w = Sensors(configuration__, mode='get', path={
-#                 'start_time': '2018-01-17',
-#                 'end_time': '2018-01-17',
-#                 'url': 'https://api.newcastle.urbanobservatory.ac.uk/api/v1/sensors/data/raw.csv'
-#             }, delimit_geography=bee.geography, delimit_quantiles=False)
-# bee.interpolate(variables=['NO2'],
-#                 data=w,
-#                 timestamp=pd.to_datetime('2018-01-17')).plot(variable='NO2', timestamp='2018-01-17', vmin=0, vmax=100)
