@@ -12,7 +12,6 @@ def ingestion2(Sensors, variables, k=5, osmf=None):
         [zxcols.append('d_{}'.format(var)) for i in range(k)]
     zx = pd.DataFrame(index=pd.MultiIndex.from_product([sens_names,sens_times],names=['Sensor Name','Timestamp']),
                       columns=zxcols)
-    times_with_insufficient_data = []
     for s in sens_names:
         si = Sensors.sensors.loc[s]
         for t in sens_times:
@@ -26,10 +25,9 @@ def ingestion2(Sensors, variables, k=5, osmf=None):
                     zx.loc[idx[si.name,t],'d_{}'.format(var)] = dij['geometry'].values
                     zx.loc[idx[si.name,t],var] = dij['Value'].values
                 except:
-                    times_with_insufficient_data.append(t)
                     print('Warning: Not enough sensors for ',s,t,var)
+                    Sensors.data.drop(Sensors.data.loc[idx[var,:,t],:].index, inplace=True)
                     pass
-    Sensors.data.drop(Sensors.data.loc[idx[:,:,times_with_insufficient_data],:].index, inplace=True)
     if Sensors.data.index.get_level_values(2).freq == 'H':
         zx['hour'] = zx.index.get_level_values(1).hour
         zx['dow'] = zx.index.get_level_values(1).dayofweek
@@ -37,6 +35,7 @@ def ingestion2(Sensors, variables, k=5, osmf=None):
     elif Sensors.data.index.get_level_values(2).freq == 'D':
         zx['dow'] = zx.index.get_level_values(1).dayofweek
         zx['day'] = zx.index.get_level_values(1).day
+        zx['week'] = zx.index.get_level_values(1).week
     if osmf is not None:
         zx = zx.reset_index(level=1).join(osmf).set_index('Timestamp', append=True)
     return zx, Sensors.data

@@ -1,7 +1,7 @@
 import sensingbee.source as sb
 
 configuration__ = {
-    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_6m/',
+    'DATA_FOLDER':'/home/adelsondias/Repos/newcastle/air-quality/data_3m/',
     'SHAPE_PATH':'/home/adelsondias/Repos/newcastle/air-quality/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp',
     'Sensors__frequency':'D',
     'Sensors__variables': ['NO2','Temperature','PM2.5'],

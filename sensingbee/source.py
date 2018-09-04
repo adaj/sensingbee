@@ -2,6 +2,7 @@
 sensingbee
 Author: Adelson Araujo Jr (adelsondias@gmail.com)
 """
+
 import time
 import numpy as np
 import pandas as pd
@@ -46,6 +47,7 @@ class Sensors(object):
             self.data = data.loc[:,['Variable','name','Timestamp','Value']].set_index(['Variable','name','Timestamp'])
             self.data = self.data.loc[idx[configuration__['Sensors__variables']],:]
             self.sensors = self.sensors.loc[self.data.index.get_level_values(1).unique()]
+            self.sensors.drop_duplicates(['lon','lat'], inplace=True)
             self.data, self.sensors = self.resample_by_frequency(configuration__['Sensors__frequency'])
             self.data.index.names = ['Variable','Sensor Name','Timestamp']
             if delimit_geography is not None:
@@ -154,7 +156,7 @@ class Geography(object):
         self.city.crs = {'init': 'epsg:4326', 'no_defs': True}
         self.city = gpd.GeoDataFrame(geometry=gpd.GeoSeries(shapely.ops.cascaded_union(self.city['geometry'])))
         self.lines, self.points = utils.pull_osm_objects(configuration__['osm_bbox'],
-                            configuration__['osm_line_objs'], configuration__['osm_point_objs'])
+                            configuration__['osm_line_objs'], configuration__['osm_point_objs']) # OSM api
         self.delimit_osm_by_city()
         self.make_meshgrid(**configuration__['Geography__meshgrid'])
         if mode=='make':
@@ -246,7 +248,7 @@ class Features(object):
             t_X, t_y = features.get_train_features('Temperature')
         *these X and y are the matrixes used by Model
     """
-    def __init__(self, configuration__, mode='load', Sensors=None, Geography=None):
+    def __init__(self, configuration__, mode='load', Sensors=None, Geography=None, save=True):
         if mode == 'load':
             self.zx, self.zi = self.load_csv(configuration__['DATA_FOLDER'], configuration__['Sensors__frequency'])
             self.zx.rename({'PM2':'PM2.5','d_PM2':'d_PM2.5','PM1':'PM1.0','d_PM1':'d_PM1.0'},axis='columns',inplace=True)
@@ -259,9 +261,10 @@ class Features(object):
                                         configuration__['osm_point_objs'])
             self.zx, self.zi = utils.ingestion2(Sensors, configuration__['Sensors__variables'], k=5, osmf=osm_features)
             self.zx.dropna(axis=0,inplace=True)
-            self.zx.to_csv(configuration__['DATA_FOLDER']+'zx_{}.csv'.format(configuration__['Sensors__frequency']))
-            self.zi.to_csv(configuration__['DATA_FOLDER']+'zi_{}.csv'.format(configuration__['Sensors__frequency']))
-            print('Features ingested and saved in {} seconds',time.time()-t0)
+            if save:
+                self.zx.to_csv(configuration__['DATA_FOLDER']+'zx_{}.csv'.format(configuration__['Sensors__frequency']))
+                self.zi.to_csv(configuration__['DATA_FOLDER']+'zi_{}.csv'.format(configuration__['Sensors__frequency']))
+            print('Features ingested and saved in {} seconds'.format(time.time()-t0))
 
     # Used for load already-made feature matrixes zx and zi
     def load_csv(self, DATA_FOLDER, frequency):
@@ -271,7 +274,6 @@ class Features(object):
         self.zx['Timestamp'] = pd.to_datetime(self.zx['Timestamp'])
         self.zx.set_index(['Sensor Name','Timestamp'], inplace=True)
         self.zx.rename(columns={key:key.split('.')[0] for key in self.zx.columns if '.' in key}, inplace=True)
-        # self.zi = pd.read_csv(DATA_FOLDER+'zi.csv')
         self.zi = pd.read_csv(DATA_FOLDER+'zi_{}.csv'.format(frequency))
         self.zi['Timestamp'] = pd.to_datetime(self.zi['Timestamp'])
         self.zi.set_index(['Sensor Name','Timestamp'], inplace=True)
@@ -280,12 +282,6 @@ class Features(object):
     # Used to resample feature matrix if wanted to train models in another frequency
     # different from the Sensors' frequency.
     def resample_by_frequency(self, frequency):
-        """
-        You can resample the frequency of zx and zi matrixes, but
-        pay attention on temporal features, if they are useless after
-        the resampling, please drop it yourself. For instance,
-        if you resampled from hour to day, drop 'hour' feature in zx.
-        """
         idx = pd.IndexSlice
         level_values_zx = self.zx.index.get_level_values
         level_values_zi = self.zi.index.get_level_values
@@ -336,16 +332,26 @@ class Features(object):
 
 class Model(object):
     """
+    For the interpolation, a model/regressor needs to be fitted with data for
+    a specific variable. The way that this class is implemented is to support
+    wrapping for sklearn objects, such as RandomForestRegressor. It also implements
+    prediction for a meshgrid features matrix and provide a routine for contourplot
+    to visualize the interpolation. At last, in order to give more information on
+    training process, it has a visualization on the learning curve of the regressor.
     """
     def __init__(self, regressor):
         self.regressor = regressor
 
-    def load_model(self, MODEL_FILE):
-        return joblib.load(MODEL_FILE)
+    # To reuse pretrained models
+    def load_model(self, MODEL_FILEPATH):
+        return joblib.load(MODEL_FILEPATH)
 
-    def save_model(self, MODEL_FILE):
+    # To save models for reusing
+    def save_model(self, MODEL_FILEPATH):
         joblib.dump(self.regressor, OUTPUT_FILE)
 
+    # It fits the regressor by scaling features and through a 10-fold CV training process
+    # the results are stored in metrics attributes
     def fit(self, X, y):
         X = MinMaxScaler().fit_transform(X)
         y = y.values.ravel()
@@ -359,6 +365,8 @@ class Model(object):
         self.mse, self.mse_std = np.mean(cv_mse), np.std(cv_mse)
         return self
 
+    # Used for the prediction in a meshgrid of a Geography object after the mesh_ingestion
+    # process. It also could be setted to plot the interpolation result
     def predict(self, X_mesh, Geography, plot=False):
         y_pred = pd.DataFrame(self.regressor.predict(MinMaxScaler().fit_transform(X_mesh)),
                               index=Geography.meshgrid.index, columns=['pred'])
@@ -370,6 +378,7 @@ class Model(object):
             self.plot_interpolation(y_pred, Geography, plot['vmin'], plot['vmax'])
         return y_pred
 
+    # Used for generate a contour plot with the meshgrid and the predicted values.
     def plot_interpolation(self, y_pred, Geography, vmin=0, vmax=100):
         Z = np.zeros(Geography.meshlonv.shape[0]*Geography.meshlonv.shape[1]) - 9999
         Z[Geography.meshgrid.index.values] = y_pred['pred'].values.ravel()
@@ -383,6 +392,10 @@ class Model(object):
         plt.tight_layout()
         plt.show()
 
+    # Used to give further information on the training performance with different
+    # samples of data. The question that this method answer is whether you are
+    # training with enough data or not. Please refer to the web for learning curve
+    # interpretation.
     def plot_learning_curve(self, X, y, title='', plot_path=False):
         train_sizes, train_scores, test_scores = learning_curve(
                 self.regressor, MinMaxScaler().fit_transform(X), y.values.ravel(), scoring='r2', n_jobs=2,
@@ -408,10 +421,17 @@ class Model(object):
 
 class Bee(object):
     """
+    As a wrapper of the whole spatial interpolation pipeline, Bee can fit the pipeline,
+    train different regressors and interpolate variables with new data, even data from
+    a csv fileset (data.csv and sensors.csv) or from HTTP/GET requests. For visualization,
+    the plot function wraps the Model.plot_interpolation but also plots aggregating a median
+    for the whole period of data, instead of plotting the interpolation for a single timestamp.
+    For usage examples to "make" a new Bee or to "load" an already made one, refer to /examples folder.
     """
     def __init__(self, configuration__):
         self.configuration__ = configuration__
 
+    # It loads/makes its Geography, Sensors and Features objects for further usage
     def fit(self, mode, verbose=False):
         t0 = time.time()
         self.geography = Geography(self.configuration__, mode)
@@ -428,6 +448,7 @@ class Bee(object):
             t0 = time.time()
         return self
 
+    # Wrapper for Model. Can fit multiple regressor given a list of tuples ("label", Regressor)
     def train(self, variables, regressor=None, X=None, y=None):
         self.models = {}
         self.scores = {}
@@ -457,6 +478,7 @@ class Bee(object):
                 self.scores[var] = (self.models[var].r2, self.models[var].mse)
         return self
 
+    # Wrapper for Model prediction applied to the Geography.meshgrid
     def interpolate(self, variables, data=None, timestamp=None):
         if data is None:
             data = self.sensors
@@ -479,6 +501,8 @@ class Bee(object):
                 self.z[var] = y_pred
         return self
 
+    # Wrapper for contour plot of predicted values of a specific variable. You can
+    # configure the color range for the contour plot with vmin and vmax parameters.
     def plot(self, variable, timestamp, vmin=0, vmax=100, regressor=None):
         if timestamp is None or timestamp=='*':
             if multiregressors:
