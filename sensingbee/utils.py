@@ -22,7 +22,7 @@ def ingestion2(Sensors, variables, k=5, osmf=None):
                 try:
                     dij = mdf['geometry'].apply(lambda x: si['geometry'].distance(x)).sort_values()
                     dij = dij.loc[(dij.index!=si.name)].nsmallest(k) #0.11 = 10km
-                    dij = sdf.loc[idx[var,dij.index,t],:].join(dij)
+                    dij = sdf.loc[idx[var,dij.index,t],:].join(dij, on="Sensor Name")
                     zx.loc[idx[si.name,t],'d_{}'.format(var)] = dij['geometry'].values
                     zx.loc[idx[si.name,t],var] = dij['Value'].values
                 except:

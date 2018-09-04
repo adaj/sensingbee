@@ -30,7 +30,7 @@ class Sensors(object):
     also "get", that can pull data from API, such as Urban Observatory open sensors API, that
     should use information on parameter `path` to make the request.
     """
-    def __init__(self, configuration__, mode, path, delimit_geography=None, delimit_quantiles=False):
+    def __init__(self, configuration__, mode, path, delimit_geography=None, delimit_quantiles=False, delimit_data_by_threshold=True):
         idx = pd.IndexSlice
         if mode=='get':
             path['start_time'] = path['start_time'].replace('-','')
@@ -70,7 +70,8 @@ class Sensors(object):
                     'line_objs': configuration__['osm_line_objs'],
                     'point_objs': configuration__['osm_point_objs']
                 })
-            self.delimit_data_by_threshold(configuration__['Sensors__threshold_callibration'])
+            if delimit_data_by_threshold:
+                self.delimit_data_by_threshold(configuration__['Sensors__threshold_callibration'])
             self.data.to_csv(configuration__['DATA_FOLDER']+'data__.csv')
             self.sensors.to_csv(configuration__['DATA_FOLDER']+'sensors__.csv')
         elif mode=='load':
