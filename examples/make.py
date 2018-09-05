@@ -14,8 +14,8 @@ configuration__ = {
     'osm_point_objs': ['traffic_signals','crossing']
 }
 
-geography = sb.Geography(configuration__, mode='load')
-sensors = sb.Sensors(configuration__, mode='load', path=configuration__['DATA_FOLDER'], delimit_geography=geography, delimit_quantiles=True)
-features = sb.Features(configuration__, mode='make', Sensors=sensors, Geography=geography)
+# geography = sb.Geography(configuration__, mode='load')
+# sensors = sb.Sensors(configuration__, mode='load', path=configuration__['DATA_FOLDER'], delimit_geography=geography, delimit_quantiles=True)
+# features = sb.Features(configuration__, mode='make', Sensors=sensors, Geography=geography)
 
-# bee = sb.Bee(configuration__).fit(mode='make', verbose=True)
+bee = sb.Bee(configuration__).fit(mode='make', verbose=True)

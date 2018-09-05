@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 
 
-def ingestion2(Sensors, variables, k=5, osmf=None):
+def ingestion3(Sensors, variables, k=5, osmf=None, freq='D'):
     idx = pd.IndexSlice
     sens_names = Sensors.data.index.get_level_values(1).unique()
     sens_times = Sensors.data.index.get_level_values(2).unique()
@@ -12,33 +12,37 @@ def ingestion2(Sensors, variables, k=5, osmf=None):
         [zxcols.append('d_{}'.format(var)) for i in range(k)]
     zx = pd.DataFrame(index=pd.MultiIndex.from_product([sens_names,sens_times],names=['Sensor Name','Timestamp']),
                       columns=zxcols)
+    times_without_enough_samples = []
     for s in sens_names:
         si = Sensors.sensors.loc[s]
         for t in sens_times:
             for var in variables:
                 sdf = Sensors.data.loc[idx[var,:,t]] # data of the var variable at  time t
                 mdf = Sensors.sensors.loc[sdf.index.get_level_values(1).unique()] # sensors about them
-                try:
-                    dij = mdf['geometry'].apply(lambda x: si['geometry'].distance(x)).sort_values()
-                    dij = dij.loc[(dij.index!=si.name)].nsmallest(k) #0.11 = 10km
-                    dij = sdf.loc[idx[var,dij.index,t],:].join(dij, on="Sensor Name")
-                    zx.loc[idx[si.name,t],'d_{}'.format(var)] = dij['geometry'].values
-                    zx.loc[idx[si.name,t],var] = dij['Value'].values
-                except:
-                    print('Warning: Not enough sensors for ',s,t,var)
-                    Sensors.data.drop(Sensors.data.loc[idx[var,:,t],:].index, inplace=True)
-                    pass
-    if Sensors.data.index.get_level_values(2).freq == 'H':
+                #
+                dij = mdf['geometry'].apply(lambda x: si['geometry'].distance(x)).sort_values()
+                dij = dij.loc[(dij.index!=si.name)]
+                if len(dij)>=k:
+                    dij = dij.nsmallest(k)
+                else:
+                    if t not in times_without_enough_samples:
+                        print('Warning: Not enough sensors for ',t)
+                        times_without_enough_samples.append(t)
+                    continue
+                dij = sdf.loc[idx[var,dij.index,t],:].join(dij, on="Sensor Name")
+                zx.loc[idx[si.name,t],'d_{}'.format(var)] = dij['geometry'].values
+                zx.loc[idx[si.name,t],var] = dij['Value'].values
+    if freq == 'H':
         zx['hour'] = zx.index.get_level_values(1).hour
         zx['dow'] = zx.index.get_level_values(1).dayofweek
         zx['day'] = zx.index.get_level_values(1).day
-    elif Sensors.data.index.get_level_values(2).freq == 'D':
+    elif freq == 'D':
         zx['dow'] = zx.index.get_level_values(1).dayofweek
         zx['day'] = zx.index.get_level_values(1).day
         zx['week'] = zx.index.get_level_values(1).week
     if osmf is not None:
         zx = zx.reset_index(level=1).join(osmf).set_index('Timestamp', append=True)
-    return zx, Sensors.data
+    return zx, Sensors.data.drop(times_without_enough_samples, level='Timestamp')
 
 def mesh_ingestion(Sensors, meshgrid, variables, timestamp):
     idx = pd.IndexSlice

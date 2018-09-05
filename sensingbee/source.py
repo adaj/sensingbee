@@ -52,6 +52,12 @@ class Sensors(object):
             self.data.index.names = ['Variable','Sensor Name','Timestamp']
             if delimit_geography is not None:
                 self.delimit_sensors_by_geography(delimit_geography.city)
+            if delimit_quantiles:
+                self.delimit_sensors_by_osm_quantile(osm_args={
+                    'Geography': delimit_geography,
+                    'line_objs': configuration__['osm_line_objs'],
+                    'point_objs': configuration__['osm_point_objs']
+                })
             self.delimit_data_by_threshold(configuration__['Sensors__threshold_callibration'])
         elif mode=='make':
             self.sensors = pd.read_csv(path+'sensors.csv',index_col='name')
@@ -63,6 +69,7 @@ class Sensors(object):
             self.data = self.data.set_index(['Variable','Sensor Name','Timestamp'])
             self.data = self.data.loc[idx[configuration__['Sensors__variables']],:]
             self.sensors = self.sensors.loc[self.data.index.get_level_values(1).unique()]
+            self.sensors.drop_duplicates(['lon','lat'], inplace=True)
             self.data, self.sensors = self.resample_by_frequency(configuration__['Sensors__frequency'])
             if delimit_geography is not None:
                 self.delimit_sensors_by_geography(delimit_geography.city)
@@ -259,7 +266,7 @@ class Features(object):
             osm_features = self.make_osm_features(Geography, Sensors.sensors,
                                         configuration__['osm_line_objs'],
                                         configuration__['osm_point_objs'])
-            self.zx, self.zi = utils.ingestion2(Sensors, configuration__['Sensors__variables'], k=5, osmf=osm_features)
+            self.zx, self.zi = utils.ingestion3(Sensors, configuration__['Sensors__variables'], k=5, osmf=osm_features, freq='D')
             self.zx.dropna(axis=0,inplace=True)
             if save:
                 self.zx.to_csv(configuration__['DATA_FOLDER']+'zx_{}.csv'.format(configuration__['Sensors__frequency']))

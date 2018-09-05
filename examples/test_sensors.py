@@ -17,10 +17,8 @@ configuration__ = {
 }
 
 bee = sb.Bee(configuration__).fit(mode='load', verbose=True)
-
-
-bee.sensors.data.drop(bee.sensors.data.loc[idx['PM2.5',:,'2018-04-01'],:].index).loc['PM2.5']
 bee.train(variables=['NO2'])
+bee.scores
 
 w = sb.Sensors(
     configuration__,
@@ -32,19 +30,16 @@ w = sb.Sensors(
 )
 wf = sb.Features(configuration__, mode='make',
             Sensors=w, Geography=bee.geography, save=False)
-f = wf.get_train_features('NO2')
-f['X'].head()
 
-# comparing features extracted to see if they are similar
-bee.features.zx.loc[idx[:,'2018-05-10'],:].head()
-g = bee.features.get_train_features('NO2')
-g['X'].loc[idx[:,'2018-05-10'],:].head()
+# f and g for the same timestamp should be the same
+f = wf.get_train_features('NO2') # from get
+g = bee.features.get_train_features('NO2') # from training data
 
-p = bee.models['NO2'].regressor.predict(X=MinMaxScaler().fit_transform(f['X']))
-bee.scores
-r2_score(f['y']['Value'].ravel(), p)
-
+idx = pd.IndexSlice
+f['y'].head()
+g['y'].loc[idx[:,'2018-05-10'],:].head()
 
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import r2_score, mean_squared_error
-idx = pd.IndexSlice
+p = bee.models['NO2'].regressor.predict(X=MinMaxScaler().fit_transform(f['X']))
+r2_score(f['y']['Value'].ravel(), p)
