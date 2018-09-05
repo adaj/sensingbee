@@ -8,7 +8,7 @@ Recently, IoT systems have been implemented to absorb city's variables, such as 
 
 The [Urban Observatory](http://uoweb1.ncl.ac.uk), from the Newcastle University, has the biggest open sensor dataset available online in the world. However, to represent such variables across larger areas, much more sensors are needed. To illustrate that, look at the figure above, these are the places with sensors in Newcastle upon Tyne, UK.
 
-![All sensors](https://github.com/adaj/sensingbee/blob/master/examples/plots/sensors.svg?raw=true)
+![](https://github.com/adaj/sensingbee/blob/master/examples/plots/sensors.png)
 
 When it comes to specific variables, less sensors are available due to the cost and maintance of such data collection systems.
 
@@ -58,7 +58,7 @@ bee.plot(variable='NO2', timestamp='2018-09-01',vmin=0, vmax=150)
 
 Result:
 
-![All sensors](https://github.com/adaj/sensingbee/blob/master/examples/plots/interpolation_no2.png?raw=true)
+![](https://github.com/adaj/sensingbee/blob/master/examples/plots/interpolation_no2.png?raw=true)
 
 
 ## Bug reports and Feature request
