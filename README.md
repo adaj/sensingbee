@@ -23,7 +23,7 @@ Clone this repository in a virtualenv and install sensingbee.
 ```bash
 git clone https://github.com/adaj/sensingbee
 cd sensingbee
-virtualenv env
+virtualenv -p python3 env 
 source env/bin/activate
 pip3 install -r requirements.txt
 pip3 install -e . --user
