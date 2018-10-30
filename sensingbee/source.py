@@ -31,7 +31,7 @@ class Sensors(object):
     also "get", that can pull data from API, such as Urban Observatory open sensors API, that
     should use information on parameter `path` to make the request.
     """
-    def __init__(self, configuration__, mode, path, delimit_geography=None, delimit_quantiles=False, delimit_data_by_threshold=True):
+    def __init__(self, configuration__, mode, path, delimit_geography=None, delimit_quantiles=True, delimit_data_by_threshold=True):
         idx = pd.IndexSlice
         if mode=='get':
             path['start_time'] = path['start_time'].replace('-','')
@@ -203,6 +203,8 @@ class Geography(object):
         self.meshgrid.rename(columns={0:'lon',1:'lat'}, inplace=True)
         self.meshgrid.crs = self.city.crs
         self.meshgrid = gpd.sjoin(self.meshgrid, self.city, how='inner', op='intersects')[self.meshgrid.columns]
+        # if delimit:
+        #     self.meshgrid = delimit_meshgrid_by_quantiles()
         return self
 
     # Used to filter the points in the meshgrid that are proper to have predictions/interpolation
@@ -266,7 +268,12 @@ class Features(object):
             osm_features = self.make_osm_features(Geography, Sensors.sensors,
                                         configuration__['osm_line_objs'],
                                         configuration__['osm_point_objs'])
-            self.zx, self.zi = utils.ingestion3(Sensors, configuration__['Sensors__variables'], k=5, osmf=osm_features, freq='D')
+            # try:
+            deprivation_features = utils.pull_depr_sensors(Sensors)
+            # except:
+                # print('Deprivation features not extracted')
+                # deprivation_features = None
+            self.zx, self.zi = utils.ingestion3(Sensors, configuration__['Sensors__variables'], k=5, osmf=osm_features, deprf=deprivation_features, freq='D')
             self.zx.dropna(axis=0,inplace=True)
             if save:
                 self.zx.to_csv(configuration__['DATA_FOLDER']+'zx_{}.csv'.format(configuration__['Sensors__frequency']))
