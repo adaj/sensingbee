@@ -1,0 +1,13 @@
+{
+  "data_csv_path":"/home/adelsondias/Repos/sensingbee/examples/newcastle/data/",
+  "data_shapefile_path":"/home/adelsondias/Repos/sensingbee/examples/newcastle/data/shape/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales/Middle_Layer_Super_Output_Areas_December_2011_Full_Extent_Boundaries_in_England_and_Wales.shp",
+  "volume_folder":"/home/adelsondias/Repos/sensingbee/examples/newcastle/volume/",
+  "sensors_frequency": "W",
+  "geography_bbox": {"south": "54.955", "west": "-1.782", "north": "55.083", "east":"-1.519"},
+  "grid_dimensions": [30,30],
+  "osm_points": {"amenity": ["hospital", "school", "restaurant", "bar", "police", "place_of_worship"],
+                  "highway":["crossing", "traffic_signals"],
+                  "leisure":["*"],
+                  "tourism":["*"]},
+  "osm_lines":{"highway": ["primary", "secondary", "residential"]}
+}

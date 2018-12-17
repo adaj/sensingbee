@@ -1,0 +1,45 @@
+,variable,feature_configuration,regressor,r2,r2_std,mse,mse_std,f_imp,f_names
+0,Temperature,pusd,gb,0.7499370520078416,0.003640434598420006,0.8210286190417477,0.008035448046153804,"[[0.01250545 0.01307662 0.00745093 0.05077433 0.05398407 0.06559636
+  0.06780599 0.04561998 0.04896351 0.04772044 0.04778691 0.04051903
+  0.06254977 0.04002518 0.03149853 0.02786074 0.02731691 0.03655811
+  0.03616192 0.02266897 0.01893499 0.01855451 0.03422184 0.02891166
+  0.01203092 0.01372326 0.01163501 0.0121573  0.013585   0.01218308
+  0.01373466 0.01234805 0.01153598]
+ [0.02492462 0.02184005 0.0095797  0.0479385  0.06051705 0.05106769
+  0.05714277 0.04640111 0.0427259  0.04850059 0.04392179 0.04503765
+  0.04531311 0.04717943 0.02670687 0.02945875 0.03570358 0.03614217
+  0.03069769 0.03021215 0.02295513 0.02792956 0.02286883 0.02262312
+  0.01395863 0.01189224 0.01851186 0.0144876  0.01455111 0.01215447
+  0.01273202 0.01256832 0.01175594]]","Index(['dow', 'day', 'week', 'Temperature', 'Temperature', 'Temperature',
+       'Temperature', 'Temperature', 'primary', 'trunk', 'motorway',
+       'residential', 'traffic_signals', 'crossing', 'NO2', 'NO2', 'NO2',
+       'NO2', 'NO2', 'PM2.5', 'PM2.5', 'PM2.5', 'PM2.5', 'PM2.5',
+       'Index of Multiple Deprivation (IMD) Score', 'Income Score (rate)',
+       'Employment Score (rate)', 'Education, Skills and Training Score',
+       'Crime Score', 'Barriers to Housing and Services Score',
+       'Living Environment Score',
+       'Total population: mid 2012 (excluding prisoners)',
+       'Population aged 16-59: mid 2012 (excluding prisoners)'],
+      dtype='object')"
+1,Temperature,pusd,rf,0.5930988913779802,0.004302264208273565,1.3625927822015735,0.010639018335364292,"[[0.03940333 0.04779632 0.02482394 0.11406758 0.07258883 0.12597482
+  0.09788887 0.09207152 0.01414006 0.01133321 0.01593307 0.01036926
+  0.01331801 0.01078305 0.02433941 0.01647488 0.02077638 0.01482304
+  0.0192757  0.02677101 0.03892626 0.01734234 0.0347758  0.02518572
+  0.00618619 0.0083013  0.0085292  0.00704468 0.00813354 0.00832203
+  0.00651837 0.00889246 0.00888979]
+ [0.03345866 0.06250082 0.02882228 0.08656703 0.11142048 0.09725365
+  0.09429912 0.10740665 0.01466727 0.01305335 0.01329215 0.01047222
+  0.01184547 0.01047028 0.01888864 0.01738162 0.01774142 0.0168527
+  0.01639782 0.0366198  0.02598251 0.02015223 0.03305241 0.02529215
+  0.01011062 0.00826859 0.01021588 0.00634632 0.00715395 0.00715611
+  0.01245745 0.00652621 0.00787415]]","Index(['dow', 'day', 'week', 'Temperature', 'Temperature', 'Temperature',
+       'Temperature', 'Temperature', 'primary', 'trunk', 'motorway',
+       'residential', 'traffic_signals', 'crossing', 'NO2', 'NO2', 'NO2',
+       'NO2', 'NO2', 'PM2.5', 'PM2.5', 'PM2.5', 'PM2.5', 'PM2.5',
+       'Index of Multiple Deprivation (IMD) Score', 'Income Score (rate)',
+       'Employment Score (rate)', 'Education, Skills and Training Score',
+       'Crime Score', 'Barriers to Housing and Services Score',
+       'Living Environment Score',
+       'Total population: mid 2012 (excluding prisoners)',
+       'Population aged 16-59: mid 2012 (excluding prisoners)'],
+      dtype='object')"

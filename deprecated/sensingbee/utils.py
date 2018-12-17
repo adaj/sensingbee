@@ -53,10 +53,7 @@ def ingestion3(Sensors, variables, k=5, osmf=None, deprf=None ,freq='D'):
                 'Employment Score (rate)',
                 'Education, Skills and Training Score',
                 'Crime Score',
-                'Barriers to Housing and Services Score',
-                'Living Environment Score',
-                'Total population: mid 2012 (excluding prisoners)',
-                'Population aged 16-59: mid 2012 (excluding prisoners)']]).set_index('Timestamp', append=True)
+                'Total population: mid 2012 (excluding prisoners)']]).set_index('Timestamp', append=True)
     return zx, Sensors.data.drop(times_without_enough_samples, level='Timestamp')
 
 def mesh_ingestion(Sensors, meshgrid, variables, timestamp):
@@ -120,13 +117,8 @@ def pull_osm_objects(bbox, line_objs, point_objs):
     lines = gpd.GeoDataFrame(lines,crs={'init': 'epsg:4326'}).to_crs(fiona.crs.from_epsg(4326))
     return lines, points
 
-def pull_depr_sensors(sensors):
-    lsoa_path = '/home/adelsondias/Repos/newcastle/air-quality/shape/Lower_Layer_Super_Output_Areas_December_2011_Full_Extent__Boundaries_in_England_and_Wales/Lower_Layer_Super_Output_Areas_December_2011_Full_Extent__Boundaries_in_England_and_Wales.shp'
-    city = gpd.read_file(lsoa_path)
-    city = city[city['lsoa11nm'].str.contains('Newcastle upon Tyne')]
-    city = city.to_crs(fiona.crs.from_epsg(4326))
-    city.crs = {'init': 'epsg:4326', 'no_defs': True}
-    df = pd.read_csv('/home/adelsondias/Downloads/deprivation.csv')
+def pull_depr_sensors(sensors, city, deprivation_path):
+    df = pd.read_csv(deprivation_path)
     df = df[df['Local Authority District name (2013)'].str.contains('Newcastle')]
     dep_df = df.set_index('LSOA name (2011)').join(city.set_index('lsoa11nm'))
     dep_df = dep_df.dropna()
@@ -135,10 +127,7 @@ def pull_depr_sensors(sensors):
                 'Employment Score (rate)',
                 'Education, Skills and Training Score',
                 'Crime Score',
-                'Barriers to Housing and Services Score',
-                'Living Environment Score',
                 'Total population: mid 2012 (excluding prisoners)',
-                'Population aged 16-59: mid 2012 (excluding prisoners)',
                 'lsoa11cd', 'lsoa11nmw','geometry']])
     dep_sensors = gpd.sjoin(sensors.sensors,dep_df,how='inner', op='intersects')
     return dep_sensors
