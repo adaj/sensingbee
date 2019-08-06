@@ -8,7 +8,7 @@ setuptools.setup(
     version="0.0.2",
     install_requires=[
        'numpy==1.14.3',
-       'pandas==0.23.0',
+       'pandas==0.25.0',
        'matplotlib==2.1.1',
        'geopandas==0.3.0',
        'scipy==1.0.0',
@@ -16,7 +16,7 @@ setuptools.setup(
     ],
     author="Adelson Araujo Jr",
     author_email="adelsondias@gmail.com",
-    description="Spatial interpolation for sensors data",
+    description="Spatial interpolation for IoT sensors data",
     long_description_content_type="text/markdown",
     url="https://github.com/adaj/sensingbee",
     packages=setuptools.find_packages(),

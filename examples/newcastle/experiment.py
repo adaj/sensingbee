@@ -1,24 +1,71 @@
 import pandas as pd
-import numpy as np
-import json
+import time
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-import sys
-sys.path.append('/home/adelsondias/Repos/sensingbee/src/')
+from sklearn.neural_network import MLPRegressor
+import joblib
+import sys, os, datetime
 
-import source, utils
-import __utils
-configuration = json.load(open('conf.json'))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+import sensingbee
+
+class Experiment(object):
+
+    def __init__(self, X, y, samples, models, t, scores):
+        self.X = X
+        self.y = y
+        self.samples = samples
+        self.models = models
+        self.t = t
+        self.scores = scores
 
 
-geography = source.Geography(configuration, __utils.load_newcastle_city_shapefile(configuration['data_shapefile_path']))
+estimator = RandomForestRegressor(max_depth=3)#RandomForestRegressor(max_depth=5)
+tuning_conf = {'params':{'n_estimators':[10, 20]},
+                    'iterations': 2, 'cv':5, 'scoring':['r2','neg_mean_squared_error']}
 
-data, metadata = __utils.load_newcastle_sensors_csv(configuration['data_csv_path'])
-sensors = source.Sensors(configuration, data, metadata).fit_in_geo(geography.city)
 
-features = source.Features(configuration)
-X, y = features.ingest(sensors.data, sensors.metadata, 'NN', 5, 0)
-# X, y = features.load(['NO2', 'PM2.5', 'Temperature'],' NN', 0)
+t0 = time.time()
+data = sensingbee.data_preparation.Data(os.path.join(os.path.dirname(__file__), 'data', '{}'.format(sys.argv[1])),
+                geodata={'points':{'shop':['*'], 'highway':['traffic_signals']},
+                        'lines':{'highway':['residential','primary']}},
+                grid_resolution=1)
+print('Data .. {}s'.format(time.time()-t0))
 
-model = source.Model(RandomForestRegressor())
-model.fit(X.loc[y['NO2'].index], y['NO2'], cv_repetitions=10)
-print(model.r2, model.mse)
+method_params = {
+    'sa': {'threshold': 10/69},
+    'nn': {},
+    'idw': {'threshold': 10/69, 'p': 2}
+}
+
+print('Start')
+X, y = {}, {}
+t = {}
+scores = {}
+samples = {}
+models = {}
+#
+Xg = sensingbee.feature_engineering.GeoFeatures(params='auto').transform(data.geodata ,places=data.metadata)
+#
+for var in ['Temperature', 'Humidity', 'PM2.5', 'CO', 'NO2']:
+    X[var], y[var] = {}, {}
+    t[var] = {}
+    scores[var] = {}
+    samples[var] = data.samples.loc[var].shape[0]
+    models[var] = {}
+    print('+ {} - {} samples'.format(var, samples[var]))
+    for method in ['sa', 'nn', 'idw']:
+        for features in ['', 'gf']:
+            t_ = time.time()
+            X[var][method+'_'+features], y[var][method+'_'+features] = sensingbee.feature_engineering.Features(variable=var, method=method, **method_params[method]).transform(data)
+            t[var][method+'_'+features] = time.time()-t_
+            print('> {}-{} in {}s'.format(var, method, features, t[var][method+'_'+features]))
+            if features == 'gf':
+                X[var][method+'_'+features] = X[var][method+'_'+features].join(Xg, on='Sensor Name')
+            X[var][method+'_'+features] = X[var][method+'_'+features].sample(frac=1)
+            y[var][method+'_'+features] = y[var][method+'_'+features].loc[X[var][method+'_'+features].index]
+            m = sensingbee.ml_modeling.Model(estimator, tuning_conf).fit(X[var][method+'_'+features], y[var][method+'_'+features])
+            scores[var][method+'_'+features] = m.base_estimator.best_score_
+            models[var][method+'_'+features] = m
+print('Done .. {}s'.format(time.time()-t0))
+
+joblib.dump(Experiment(X, y, samples, models, t, scores), 'experiment_{}.joblib'.format(str(datetime.datetime.now())[:10]))

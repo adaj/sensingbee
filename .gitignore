@@ -4,4 +4,9 @@ dist
 __pycache__
 .ipynb_checkpoints
 *.csv
+*.zip
+sensor_notes
 shape
+deprecated
+geohunter
+data
