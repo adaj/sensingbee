@@ -47,6 +47,7 @@ class Features(object):
             for time in samples.index.get_level_values('Timestamp').unique():
                 v_samples = samples.loc[idx[var, :, time]].reset_index()
                 v_sensors = metadata.loc[v_samples['Sensor Name']]
+                v_sensors = v_sensors.dropna()
                 mask = y.loc[idx[:, time],:]
                 if grid is not None:
                     _ = grid.apply(lambda x: self.method(x,

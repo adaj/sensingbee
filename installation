@@ -1,0 +1,73 @@
+# Install conda (miniconda is lighter) for python 3.6+.
+
+https://docs.conda.io/projects/conda/en/latest/user-guide/install/
+
+
+# Go to the folder you manage your projects (e.g. .../repos)
+
+cd .../repos
+
+
+# Get the *sensingbee* source code from git
+
+$ git clone https://github.com/adaj/sensingbee.git
+
+
+# Also, you'll need the *geohunter* package
+#  to manage auxiliary data and variables from OpenStreetMap
+
+$ git clone https://github.com/adaj/geohunter.git
+
+
+# Create an environment to install the requirements there.
+
+$ conda create -n senv
+$ conda activate senv
+$ conda init
+
+# To exit your conda environment, "conda deactivate"
+
+
+# Install sensingbee requirements.
+
+$ conda install pandas==0.25.1
+$ conda install scikit-learn==0.21.3
+$ conda install geopandas==0.3.0
+
+
+# Install pip in your env, we need some packages that are easily 
+#  installed from pip.
+
+$ conda install pip
+$ conda init
+
+# (Optional) If you want to use jupyter notebooks on your project,
+#  you'll need to install it inside your conda environment.
+
+$ conda install jupyter
+
+
+# Create a folder for your project, let's say "~/sensingbee/project1"
+#  and create a configuration file called "sensingbee.conf" there
+#  with the path to the sensingbee source code. Please change 
+#  "~/sensingbee" to the place where you placed the folder you got.
+#  The FULL_PATH here refers to the absolute path (e.g. got from pwd)
+
+$ mkdir ~/sensingbee/project1
+$ echo "param,val" > FULL_PATH/repos/sensingbee/project1/sensingbee.conf
+$ echo "SOURCE_PATH,FULL_PATH/repos/sensingbee" >> FULL_PATH/repos/sensingbee/project1/sensingbee.conf
+$ echo "GEOHUNTER_PATH,FULL_PATH/repos/geohunter" >> FULL_PATH/repos/sensingbee/project1/sensingbee.conf
+
+
+# Test *senginbee* installation
+
+$ python3
+>>> import pandas as pd
+>>> conf = pd.read_csv('sensingbee.conf', index_col='param')
+>>> import sys
+>>> sys.path.append(conf.loc['GEOHUNTER_PATH','val'])
+>>> sys.path.append(conf.loc['SOURCE_PATH','val'])
+>>> import sensingbee
+>>> import sensingbee.data_preparation
+>>> import sensingbee.feature_engineering
+>>> import sensingbee.ml_modeling

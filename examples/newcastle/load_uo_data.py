@@ -5,7 +5,7 @@ import geopandas as gpd
 
 
 DATA_FOLDER = '/home/adelsondias/Repos/sensingbee/examples/newcastle/data/01jan-31mar'
-OUTPUT_FOLDER = '/home/adelsondias/Repos/sensingbee/examples/newcastle/data/daily'
+OUTPUT_FOLDER = '/home/adelsondias/Repos/sensingbee/examples/newcastle/data/weekly'
 SHAPEFILE = '/home/adelsondias/Downloads/Major_Towns_and_Cities_December_2015_Boundaries.geojson'
 SAMPLE_FREQUENCY = 'W'
 load = False

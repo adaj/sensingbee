@@ -1,0 +1,27 @@
+
+# Go to the project folder
+
+$ cd FULL_PATH/repos/sensingbee/project1/data
+$ mkdir data
+$ cd data
+
+# Getting Newcastle shapefile 
+
+$ wget https://adaj.github.io/files/newcastle.geojson
+$ cd ..
+
+
+# Add the path of your data folder to the configurations
+
+$ echo "DATA_PATH,FULL_PATH/repos/sensingbee/project1/data" >> FULL_PATH/repos/sensingbee/project1/sensingbee.conf
+
+# Get data from UO portal (2 months+) and store in DATA_PATH
+
+# Add to the configuration file the sample frequency
+#  you want to analyse (e.g. weekly). If you have a small
+#  dataset, consider test it with hourly (H) samples
+
+$ echo "SAMPLE_FREQ,H" >> FULL_PATH/repos/sensingbee/project1/sensingbee.conf
+
+
+
