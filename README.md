@@ -4,37 +4,28 @@ Spatial interpolation for sensors data :earth_americas:
 
 ## Purpose
 
-Recently, IoT systems have been implemented to absorb city's variables, such as traffic, air quality etc. To do so, the deployment of a network of sensors becomes a fundamental requirement, and the cost for scaling up becomes an obstacle.
+Recently, IoT systems have been implemented to measure the city's variables (such as weather, traffic, air quality, sound etc). To do so, the deployment of a (big) network of sensors becomes a fundamental requirement, and the high cost for spatially scaling up the sensor network becomes an obstacle.
 
-The [Urban Observatory](http://uoweb1.ncl.ac.uk), from the Newcastle University, has the biggest open sensor dataset available online in the world. However, to represent such variables across larger areas, much more sensors are needed. To illustrate that, look at the figure above, these are the places with sensors in Newcastle upon Tyne, UK.
+One great example comes from the [Urban Observatory](http://uoweb1.ncl.ac.uk), from the Newcastle University, which has the biggest open sensor dataset available online in the world. Even with a huge amount of sensors, much more sensors are needed to represent such variables across larger (and marginal) areas in a continuous surface. To illustrate that, look at the figure above, these are the places with sensors in Newcastle upon Tyne, UK.
 
 ![](https://github.com/adaj/sensingbee/blob/master/examples/plots/sensors.png)
 
-When it comes to specific variables, less sensors are available due to the cost and maintance of such data collection systems. Also, it's expensive to deploy new sensors, and it's bad to have many of them in terms of energy consumption of a smart city.
+One one hand, more sensors are expensive to deploy and maintain. On the other hand, more sensors mean higher reliability for such variables. Smart cities have to think this trade-off carefully.
 
-Thus, this project aims to apply and implement spatial interpolation models to spread data obtained by the sensors around regions where data isn't collected, and then expand the potential of the city's IoT infrastructure. As a result of the interpolation process of a variable, the results can be illustrated such as following.
+This project aims to apply and implement reliable spatial interpolation with data obtained by the sensors around regions where data isn't collected, and (potentially) expand the potential of the city's IoT infrastructure. A visualization of such spatial interpolation (of one variable) can be illustrated as below.
 
 ![](https://github.com/adaj/sensingbee/blob/master/examples/plots/interpolation_no2.png?raw=true)
 
 
-## How to use
+## Know more
 
-### Installing
+This project is only a PoC, so you should not rely on it as is. Please contribute!
 
-Under construction...
 
 ### Usage
 
-
 Please look in the examples folder, a notebook will certainly guide you to use this tool.
 
-
-## Bug reports and Feature request
-
-
-You can help by reporting bugs, suggesting features, reviewing feature specifications or just by sharing your opinion. Open [issues](https://github.com/adaj/sensingbee/issues) for all of that.
-
-If you need more details or want to collaborate, please contact me at adelsondias@gmail.com.
 
 ## Contributing
 
@@ -48,7 +39,7 @@ Pull requests are welcome !
 
 ## Authors
 
-This project was developed by [Adelson Araujo Jr](https://adaj.github.io).
+This project was developed by [Adelson de Araujo](https://adaj.github.io).
 
 ## License
 
